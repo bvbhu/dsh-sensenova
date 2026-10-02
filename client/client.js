@@ -78,33 +78,60 @@ window.__ModuleLoader__.load({
 
 		// 配色照 sensenova-usage-dashboard：用量 <60% 绿 / <85% 黄 / 其余红
 		const colorForPct = (pct) => (pct < 60 ? C.ok : pct < 85 ? "#faad14" : C.err);
+		const fmtNum = (n) => Number(n ?? 0).toLocaleString("zh-CN", { maximumFractionDigits: 1 });
+		const fmtReset = (ms) => {
+			if (!ms) return "—";
+			const d = new Date(ms);
+			return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+		};
 
-		/** 圆环仪表（dashboard gauge 的 JSX 版）：pct = 已用百分比。 */
-		function RingGauge({ pct, color, size = 68, caption }) {
-			const r = size / 2 - 6;
-			const c = 2 * Math.PI * r;
-			return h("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0 } },
-				h("svg", { width: size, height: size },
-					h("circle", { cx: size / 2, cy: size / 2, r, fill: "none", stroke: "#eee", strokeWidth: 6 }),
-					pct === null ? null :
-						h("circle", {
-							cx: size / 2, cy: size / 2, r, fill: "none", stroke: color, strokeWidth: 6,
-							strokeDasharray: c, strokeDashoffset: c * (1 - pct / 100), strokeLinecap: "round",
-							transform: `rotate(-90 ${size / 2} ${size / 2})`, style: { transition: "stroke-dashoffset 0.4s" },
-						}),
-					h("text", { x: size / 2, y: size / 2 + 5, textAnchor: "middle", fontSize: 14, fontWeight: 600, fill: pct === null ? "#bbb" : color },
-						pct === null ? "—" : `${Math.round(pct)}%`)),
-				h("span", { style: { fontSize: 10, opacity: 0.65 } }, caption));
+		/** 用量进度条（dashboard 样式：细条 + 用量配色）。 */
+		function Bar({ pct }) {
+			return h("div", { style: { height: 6, borderRadius: 3, background: "#eee", overflow: "hidden" } },
+				h("div", {
+					style: {
+						height: "100%", width: `${Math.min(100, Math.max(0, pct))}%`,
+						background: colorForPct(pct), borderRadius: 3, transition: "width 0.4s",
+					},
+				}));
 		}
 
-		/** 账号卡片：头部（标识符 + 用户名）+ 圆环（5h 池）+ 状态徽章堆栈。 */
+		/** 单个积分池明细块（照 dashboard 账号明细）：5h/7d 用量条 + 剩余/使用率 + 重置时间。 */
+		function PoolBlock({ pool }) {
+			const isDefault = pool.poolType === "default";
+			const tag = isDefault ? badge("通用", C.primary, "#e6f4ff") : badge("专属", "#389e0d", "#f6ffed");
+			const h5limit = pool.limit ?? 0;
+			const h5used = pool.used ?? 0;
+			const h5pct = h5limit > 0 ? (h5used / h5limit) * 100 : 0;
+			const h5remaining = pool.remaining ?? 0;
+			const h5usagePct = 100 - (pool.ratio5h ?? 1) * 100;
+			const d7limit = pool.limit7d ?? 0;
+			const d7used = pool.used7d ?? 0;
+			const d7pct = d7limit > 0 ? (d7used / d7limit) * 100 : 0;
+			const d7remaining = pool.remaining7d ?? 0;
+			const row = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 11.5, margin: "2px 0" };
+			const labelStyle = { opacity: 0.65 };
+			const valueStyle = { fontWeight: 500, fontVariantNumeric: "tabular-nums" };
+			return h("div", { style: { border: "1px solid #f0f0f0", borderRadius: 6, padding: "8px 10px", marginTop: 6 } },
+				h("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 4 } },
+					tag, h("strong", { style: { fontSize: 12 } }, pool.name || (isDefault ? "通用积分池" : "专属积分池"))),
+				h("div", { style: row }, h("span", { style: labelStyle }, "5小时用量"), h("span", { style: valueStyle }, `${fmtNum(h5used)} / ${fmtNum(h5limit)}`)),
+				h(Bar, { pct: h5pct }),
+				h("div", { style: row }, h("span", { style: labelStyle }, "剩余 / 使用率"), h("span", { style: valueStyle }, `${fmtNum(h5remaining)} · ${h5usagePct.toFixed(1)}%`)),
+				d7limit > 0 ? h("div", { style: { ...row, marginTop: 6 } }, h("span", { style: labelStyle }, "7天用量"), h("span", { style: valueStyle }, `${fmtNum(d7used)} / ${fmtNum(d7limit)}`)) : null,
+				d7limit > 0 ? h(Bar, { pct: d7pct }) : null,
+				d7limit > 0 ? h("div", { style: row }, h("span", { style: labelStyle }, "剩余 / 使用率"), h("span", { style: valueStyle }, `${fmtNum(d7remaining)} · ${(100 - d7pct).toFixed(1)}%`)) : null,
+				h("div", { style: { ...row, marginTop: 4, opacity: 0.65 } },
+					h("span", null, `重置 ${fmtReset(pool.resetAt)} / ${pool.resetAt7d ? fmtReset(pool.resetAt7d) : "—"}`)));
+		}
+
+		/** 账号卡片：头部（标识符 + 用户名 + 状态徽章）+ 每积分池明细块 + 赠送余额。 */
 		function AccountCard({ account }) {
-			const credits = account.usage?.pools?.find((p) => p.poolType === "default");
-			const usedPct = credits && typeof credits.ratio5h === "number" ? credits.ratio5h * 100 : null;
+			const usage = account.usage;
+			const pools = usage?.pools ?? [];
 			const card = { border: "1px solid #f0f0f0", borderRadius: 8, overflow: "hidden", background: "#fff" };
 			const cardHeader = { padding: "8px 12px", background: "#fafafa", borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 };
-			const cardBody = { padding: "10px 12px", display: "flex", gap: 14, alignItems: "center" };
-			const infoLine = { display: "flex", alignItems: "center", gap: 6, margin: "3px 0", fontSize: 12 };
+			const cardBody = { padding: "8px 12px 10px" };
 			const muted = { color: "#888" };
 			return h("div", { style: card },
 				h("div", { style: cardHeader },
@@ -112,20 +139,20 @@ window.__ModuleLoader__.load({
 					h("span", { style: { fontSize: 12, ...muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
 						account.username || "无用户名")),
 				h("div", { style: cardBody },
-					h(RingGauge, { pct: usedPct, color: usedPct === null ? "#bbb" : colorForPct(usedPct), caption: "5h 池已用" }),
-					h("div", { style: { flex: 1, minWidth: 0 } },
-						h("div", { style: infoLine },
-							account.keyStatus === "ok" ? badge("key 正常", C.ok, C.okBg) : badge(`key ${account.keyStatus}`, C.err, C.errBg),
-							h("span", { style: { fontSize: 11, opacity: 0.7 } }, account.keySource)),
-						h("div", { style: infoLine },
-							account.busy ? badge("忙", C.warn, C.warnBg) : badge("闲", C.ok, C.okBg),
-							account.cooldownRemainingMs > 0 ? badge(`冷却 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg) : null),
-						h("div", { style: { ...infoLine, ...muted } },
-							credits
-								? `余量 ${credits.remaining.toLocaleString()} / ${credits.limit.toLocaleString()}`
-								: "余量未拉取"),
-						h("div", { style: { ...infoLine, ...muted } },
-							`最近 429：${fmtTime(account.lastRateLimitAt)}`))));
+					h("div", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 2 } },
+						account.keyStatus === "ok" ? badge("key 正常", C.ok, C.okBg) : badge(`key ${account.keyStatus}`, C.err, C.errBg),
+						h("span", { style: { fontSize: 11, opacity: 0.7 } }, account.keySource),
+						account.busy ? badge("忙", C.warn, C.warnBg) : badge("闲", C.ok, C.okBg),
+						account.cooldownRemainingMs > 0 ? badge(`冷却 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg) : null,
+						h("span", { style: { fontSize: 11, ...muted, marginLeft: "auto" } }, `最近 429：${fmtTime(account.lastRateLimitAt)}`)),
+					pools.length === 0
+						? h("div", { style: { fontSize: 12, ...muted, padding: "6px 0" } }, "余量未拉取：点上方「刷新」拉取积分池用量")
+						: pools.map((pool, i) => h(PoolBlock, { key: i, pool })),
+					usage && Number.isFinite(usage.grantBalance)
+						? h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 11.5, marginTop: 6, paddingTop: 6, borderTop: "1px dashed #f0f0f0" } },
+							h("span", { style: muted }, "赠送余额"),
+							h("span", { style: { fontWeight: 500 } }, fmtNum(usage.grantBalance)))
+						: null));
 		}
 
 		/** 账号管理区（照 sensenova-usage-dashboard 的 config-row 交互）：
