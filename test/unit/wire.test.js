@@ -30,6 +30,68 @@ test('assistant tool-call 块 → tool_calls 字段', () => {
   assert.equal(assistant.tool_calls.length, 1)
   assert.equal(assistant.tool_calls[0].function.name, 'get_weather')
   assert.equal(assistant.tool_calls[0].function.arguments, '{"city":"北京"}')
+  // 回归：tool-call 块绝不进入 content 文本（此前 "[调用工具 xxx]" 占位
+  // 会拼进 assistant 历史并发回上游 → 模型复述成对话流里的 [调用工具 xxx]）
+  assert.equal(assistant.content, '我来查')
+  assert.ok(!JSON.stringify(body).includes('调用工具'), '载荷不得含 [调用工具] 占位文本')
+})
+
+test('assistant 纯 tool-call 块 → content=null + tool_calls（无占位文本）', () => {
+  const body = buildRequestBody({ ...base, messages: [
+    { role: 'user', content: '查' },
+    { role: 'assistant', content: [{ type: 'tool-call', id: 'call_1', name: 'f', arguments: '{}' }] },
+  ] })
+  const assistant = body.messages[1]
+  assert.equal(assistant.role, 'assistant')
+  assert.equal(assistant.content, null)
+  assert.equal(assistant.tool_calls.length, 1)
+  assert.ok(!JSON.stringify(body).includes('调用工具'), '载荷不得含 [调用工具] 占位文本')
+})
+
+test('assistant reasoning + tool-call → content=null（reasoning 与 tool-call 都不进文本）', () => {
+  const body = buildRequestBody({ ...base, messages: [
+    { role: 'assistant', content: [
+      { type: 'reasoning', text: '思考中' },
+      { type: 'tool-call', id: 'c1', name: 'f', arguments: '{}' },
+    ] },
+  ] })
+  const assistant = body.messages[0]
+  assert.equal(assistant.role, 'assistant')
+  assert.equal(assistant.content, null)
+  assert.ok(!JSON.stringify(body).includes('调用工具'))
+})
+
+test('user 消息里的 tool-call 块不产生占位文本', () => {
+  const body = buildRequestBody({ ...base, messages: [
+    { role: 'user', content: [
+      { type: 'text', text: '接着做' },
+      { type: 'tool-call', id: 'c1', name: 'read', arguments: '{"path":"a"}' },
+    ] },
+  ] })
+  assert.equal(body.messages[0].content, '接着做')
+  assert.ok(!JSON.stringify(body).includes('调用工具'))
+})
+
+test('role:tool 消息 → role:tool + tool_call_id 配对（不降级成 user）', () => {
+  const body = buildRequestBody({ ...base, messages: [
+    { role: 'user', content: '查' },
+    { role: 'assistant', content: [{ type: 'tool-call', id: 'call_a', name: 'read_file', arguments: '{}' }] },
+    { role: 'tool', toolCallId: 'call_a', content: [{ type: 'text', text: 'FILE A CONTENT' }] },
+  ] })
+  const tool = body.messages.find((m) => m.role === 'tool')
+  assert.equal(tool.tool_call_id, 'call_a')
+  assert.equal(tool.content, 'FILE A CONTENT')
+  assert.equal(body.messages.filter((m) => m.role === 'user').length, 1, 'tool 消息不得降级为 user')
+})
+
+test('role:tool 空 content → 占位文本（不丢配对）', () => {
+  const body = buildRequestBody({ ...base, messages: [
+    { role: 'tool', toolCallId: 'call_b', content: [] },
+  ] })
+  const tool = body.messages[0]
+  assert.equal(tool.role, 'tool')
+  assert.equal(tool.tool_call_id, 'call_b')
+  assert.equal(tool.content, '(no tool output)')
 })
 
 test('user 里的 tool-result → role:tool 消息（带 tool_call_id）', () => {

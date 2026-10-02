@@ -29,11 +29,14 @@ window.__ModuleLoader__.load({
 		const USAGE_PATH = "/api/dsh-sensenova/refresh-usage";
 		const REFETCH_PATH = "/api/dsh-sensenova/refetch-key";
 		const ACCOUNTS_PATH = "/api/dsh-sensenova/accounts";
+		const MODELS_PATH = "/api/dsh-sensenova/models";
+		const SAVE_CONFIG_PATH = "/api/dsh-sensenova/save-config";
 		const POLL_MS = 30_000;
 
 		// 配色照 sensenova-usage-dashboard（Ant 风格）：主色 #0958d9，
 		// 成功 #52c41a / 警告 #faad14 / 错误 #f5222d + 对应浅底徽章。
 		const C = { primary: "#0958d9", ok: "#52c41a", okBg: "#e6f7e6", warn: "#ad6800", warnBg: "#fffbe6", err: "#f5222d", errBg: "#fff1f0" };
+		const fmtClock = (ms) => { if (!ms) return "—"; const d = new Date(ms); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`; };
 		const fmtTime = (ms) => {
 			if (!ms) return "—";
 			const d = new Date(ms);
@@ -48,6 +51,15 @@ window.__ModuleLoader__.load({
 			const data = await response.json().catch(() => ({}));
 			if (!response.ok || data.ok === false) throw new Error(data.error ?? `HTTP ${response.status}`);
 			return data.value;
+		};
+		/** 解开 volatile 活引用（schemastery Loader 传 get() 对象）。 */
+		const unwrapVolatile = (value) => {
+			if (value === null || typeof value !== "object") return value;
+			if (typeof value.get === "function") return value.get();
+			if (Array.isArray(value)) return value.map(unwrapVolatile);
+			const out = {};
+			for (const [key, item] of Object.entries(value)) out[key] = unwrapVolatile(item);
+			return out;
 		};
 		const request = async (method, path, body) => {
 			const response = await fetch(path, {
@@ -376,17 +388,168 @@ window.__ModuleLoader__.load({
       );
 		}
 
-		function StatusCard({ view }) {
+		/** 模型列表（设置页，照 dsh-connect-trae 的 dsm-trae-models 结构）：
+		 *  数据来自 GET /api/dsh-sensenova/models（API 发现目录 + enabled 状态）；
+		 *  勾选启用（enabledModels），保存走 Host save-config 端点
+		 *  （settings.mutate），configForms scope 仅兜底。刷新目录会触发
+		 *  后端重新从 /v1/models 拉取（listModels → discover）。 */
+		function ModelsList({ settingsScope }) {
+			const [models, setModels] = react.useState(null);
+			const [error, setError] = react.useState(void 0);
+			const [notice, setNotice] = react.useState(void 0);
+			const [busy, setBusy] = react.useState(false);
+			const [refreshing, setRefreshing] = react.useState(false);
+			/** 草稿：id → { enabled, image }（保存前不落配置） */
+			const [draft, setDraft] = react.useState(null);
+
+			const applyFresh = react.useCallback((value, silent) => {
+				const fresh = value?.models ?? [];
+				// 后端 source='static' 且带 error 时，说明 API 拉取失败已降级，
+				// 透出给用户（区别于“成功刷新”）
+				if (value?.source === 'static' && value?.error) {
+					setError(`API 目录拉取失败，已显示静态目录：${value.error}`);
+				} else {
+					setError(void 0);
+				}
+				setModels(fresh);
+				setDraft(null);
+				if (!silent) setNotice("模型目录已刷新");
+			}, []);
+
+			const load = react.useCallback(async (silent) => {
+				try {
+					const value = await request("GET", MODELS_PATH);
+					applyFresh(value, silent);
+				} catch (e) {
+					setError(e?.message ?? String(e));
+				}
+			}, [applyFresh]);
+			// 启动即拉一次（照 trae：status 加载后 visibleModels 即有数据），open 时再拉
+			react.useEffect(() => { void load(true); }, [load]);
+			react.useEffect(() => { if (open) void load(true); }, [open, load]);
+
+			// 勾选状态：草稿优先，否则取当前配置状态
+			const pick = (id) => draft?.[id] ?? (models?.find((m) => m.id === id)?.enabled ? { enabled: true, image: Boolean(models.find((m) => m.id === id)?.image) } : { enabled: false, image: false });
+			const activeEnabledIds = new Set((models ?? []).filter((m) => pick(m.id).enabled).map((m) => m.id));
+			const toggle = (id, field) => {
+				setDraft((prev) => {
+					const base = models.find((m) => m.id === id);
+					const current = prev?.[id] ?? { enabled: Boolean(base?.enabled), image: Boolean(base?.image) };
+					return { ...(prev ?? {}), [id]: { ...current, [field]: !current[field] } };
+				});
+			};
+
+			const refreshModels = async () => {
+				setRefreshing(true);
+				try {
+					const value = await request("GET", MODELS_PATH);
+					const fresh = value?.models ?? [];
+					const freshIds = new Set(fresh.map((m) => m.id));
+					// 保留仍存在的勾选（照 trae refreshModels：只留 fresh 里的 id）
+					setDraft((prev) => {
+						if (!prev) return prev;
+						const next = {};
+						for (const [id, state] of Object.entries(prev)) if (freshIds.has(id)) next[id] = state;
+						return next;
+					});
+					applyFresh(value, false);
+				} catch (e) {
+					setError(e?.message ?? String(e));
+				} finally { setRefreshing(false); }
+			};
+
+			const save = async () => {
+				if (!models) return;
+				setBusy(true); setNotice(void 0);
+				try {
+const enabledIds = models.filter((m) => pick(m.id).enabled).map((m) => m.id);
+					// 写回配置：Host 端点优先（settings.mutate 在宿主进程内执行，
+					// 唯一可靠写者；照 dsh-connect-workbuddy 的 __save 模式），
+					// scope.set 只作镜像刷新兜底。模态由 API 决定，只写 enabledModels。
+					{
+						const field = "enabledModels";
+						let landed = false;
+						try {
+							const result = await post(SAVE_CONFIG_PATH, { field, value: enabledIds });
+							landed = result?.ok !== false;
+						} catch (hostError) {
+							if (settingsScope === void 0) throw hostError;
+							if (await settingsScope.set(field, enabledIds) === false) throw new Error(`${field} 写入被拒绝（Host 端点与 scope 均失败）`);
+							const readBack = unwrapVolatile(settingsScope.getSnapshot().value)?.[field];
+							landed = Array.isArray(readBack) && readBack.length === enabledIds.length && enabledIds.every((id) => readBack.includes(id));
+							if (!landed) throw new Error(`${field} 未落盘（回读校验失败）`);
+						}
+						if (!landed) throw new Error(`${field} 写入未确认落盘`);
+					}
+					setNotice(`已保存：启用 ${enabledIds.length} 个模型`);
+					setDraft(null);
+					await load(true);
+				} catch (e) {
+					setNotice(`保存失败：${e?.message ?? e}`);
+				} finally { setBusy(false); }
+			};
+
+			const fmtCapacity = (n) => n >= 1000000 ? `${(n / 1000000).toFixed(0)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n ?? "—");
+
+			return h("div", { className: "dsm-trae-models", style: { marginTop: 12 } },
+				h("div", { className: "dsm-trae-models-head" },
+					h("div", null,
+						h("h3", { className: "dsm-trae-models-title" }, "模型列表"),
+						h("p", { className: "dsm-trae-models-summary" }, `已启用 ${activeEnabledIds.size} / ${models?.length ?? 0} 个模型`)),
+					h("button", { type: "button", className: "dsm-btn dsm-btn-outline", disabled: refreshing || busy, onClick: refreshModels },
+						refreshing ? "刷新中…" : "刷新目录")),
+				error
+					? h("p", { className: "dsm-trae-model-capability-note", style: { color: C.err } }, `模型目录加载失败：${error}`)
+					: null,
+				notice
+					? h("p", { className: "dsm-trae-model-capability-note", style: { color: notice.includes("失败") ? C.err : "var(--dsw-alias-label-tertiary,#999)" } }, notice)
+					: null,
+				models === null
+					? h("p", { className: "dsm-trae-model-capability-note" }, "加载中…")
+					: h("div", { className: "dsm-trae-model-list" },
+						models.map((m) => h("div", { key: m.id, className: `dsm-trae-model${pick(m.id).enabled ? "" : " dsm-trae-model-disabled"}` },
+							h("div", { className: "dsm-trae-model-head" },
+								h("label", { className: "dsm-trae-model-enabled" },
+									h("input", { type: "checkbox", checked: pick(m.id).enabled, disabled: busy, onChange: () => toggle(m.id, "enabled") }),
+									h("span", { className: "dsm-trae-model-copy" },
+										h("span", { className: "dsm-trae-model-name" }, m.name || m.id))),
+								h("div", { className: "dsm-trae-model-options" },
+									m.inputModalities && m.inputModalities.includes("image")
+										? h("span", { style: { fontSize: 11, opacity: 0.75 } }, "视觉输入")
+										: null)),
+							h("div", { className: "dsm-trae-model-meta" },
+								m.contextWindow ? h("span", null, `上下文 ${fmtCapacity(m.contextWindow)}`) : null,
+								m.maxTokens ? h("span", null, `输出 ${fmtCapacity(m.maxTokens)}`) : null)))));
+h("div", { className: "dsm-trae-model-actions" },
+					h("span", { className: "dsm-trae-model-capability-note" }, "勾选「启用」决定使用的模型；图像模态由 API 返回值自动判断。"),
+					h("div", { className: "dsm-trae-model-actions-buttons" },
+						h("button", { type: "button", className: "dsm-btn dsm-btn-primary", disabled: busy, onClick: save }, busy ? "保存中…" : "保存勾选")));
+		}
+		function StatusCard({ view, settingsScope }) {
 			const [status, setStatus] = react.useState(null);
 			const [error, setError] = react.useState(void 0);
 			const [busy, setBusy] = react.useState(false);
 			const [notice, setNotice] = react.useState(void 0);
+			// 上次成功刷新时间（启动自动刷一次 + 手动/轮询都更新）
+			const [lastRefreshAt, setLastRefreshAt] = react.useState(void 0);
+			// scope 异步就绪：订阅 rebind 总线，scope 变化时强制重渲染（新 scope 经 inject() 传入）
+			const [, setScopeVersion] = react.useState(0);
+			react.useEffect(() => {
+				const bus = window.__dshSensenovaScopeBus;
+				if (!bus) return void 0;
+				const fn = () => setScopeVersion((v) => v + 1);
+				bus.add(fn);
+				return () => bus.delete(fn);
+			}, []);
 
 			const load = react.useCallback(async () => {
 				try {
 					const response = await fetch(STATUS_PATH);
 					const data = await response.json();
-					if (data.ok !== false) setStatus(data.value);
+					if (data.ok !== false) {
+						setStatus(data.value);
+						setLastRefreshAt(Date.now());
+					}
 					setError(void 0);
 				} catch (e) {
 					setError(e?.message ?? String(e));
@@ -454,6 +617,7 @@ window.__ModuleLoader__.load({
 				h("div", { style: { display: "flex", alignItems: "center", gap: 8, margin: "4px 0 10px", flexWrap: "wrap" } },
 					h("strong", null, "SenseNova Token Plans · 账号池状态"),
 					h("button", { style: btn, disabled: busy, onClick: onRefreshAll, title: "逐个启用账号拉取积分池余量；余量拉取失败时自动重抓 key（重新登录）后重试" }, "刷新"),
+					lastRefreshAt ? h("span", { style: { fontSize: 11, opacity: 0.6 } }, `上次刷新 ${fmtClock(lastRefreshAt)}`) : null,
 					notice ? h("span", { style: { fontSize: 12, opacity: 0.8 } }, notice) : null),
 				h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 } },
 					accounts.map((a) => h(AccountCard, {
@@ -465,6 +629,9 @@ window.__ModuleLoader__.load({
 				view === "page"
 					? h(AccountManager, { onChanged: load, existingLabels: accounts.map((a) => a.label) })
 					: null,
+				view === "page"
+					? h(ModelsList, { settingsScope })
+					: null,
 				logTail
 					? h("details", { style: { marginTop: 10 } },
 						h("summary", { style: { fontSize: 12, cursor: "pointer", opacity: 0.8 } }, "最近日志"),
@@ -475,6 +642,34 @@ window.__ModuleLoader__.load({
 		const inject = ["slots"];
 		function apply(ctx) {
 			try {
+				// 设置面 scope（configForms 服务，照 dsh-connect-trae/workbuddy 模式）：
+				// 镜像（describe 的 namespaces）异步加载，须订阅 rebind，就绪后自动
+				// 绑定到宿主实际服务的 namespace；绑定成功即可写（writable 标志不可靠）。
+				let settingsScope;
+				let scopeOff;
+				const scopeListeners = new Set();
+				const scopeNotify = () => { for (const l of [...scopeListeners]) l(); };
+				const rebindScope = () => {
+					let served;
+					try {
+						const forms = ctx.get("configForms");
+						served = forms === void 0 ? void 0 : (forms.describe().getSnapshot().view?.namespaces ?? []).find((entry) => entry.ns === "dsh-sensenova" || /sensenova/i.test(entry.ns));
+					} catch {}
+					const next = served === void 0 ? void 0 : ctx.get("configForms")?.get(served.ns);
+					if (next !== settingsScope) {
+						scopeOff?.();
+						settingsScope = next;
+						scopeOff = settingsScope?.subscribe(scopeNotify);
+						scopeNotify();
+					}
+				};
+				rebindScope();
+				try { ctx.get("configForms")?.describe().subscribe?.(rebindScope); } catch {}
+				// scope 就绪/变化时通知卡片重渲染（EventsList/ModelsList 经此更新）
+				window.__dshSensenovaScopeBus = window.__dshSensenovaScopeBus ?? new Set();
+				const bus = window.__dshSensenovaScopeBus;
+				const onScope = (fn) => { bus.add(fn); return () => bus.delete(fn); };
+				scopeListeners.add(() => { for (const fn of [...bus]) fn(settingsScope); });
 				// 卡片 hover 效果（raw JSX 无样式表文件，注入一次全局样式）
 				if (!document.getElementById("dsh-sensenova-style")) {
 					const style = document.createElement("style");
@@ -482,6 +677,34 @@ window.__ModuleLoader__.load({
 					style.textContent = [
 						".dsh-sensenova-card:hover { border-color: #d9d9d9 !important; box-shadow: 0 2px 8px rgba(0,0,0,0.09); }",
 						".dsh-sensenova-card:hover .dsh-sensenova-card-header { background: #f0f5ff !important; }",
+						// dsm-trae-models 全套样式（照 dsh-connect-trae，含 dsm-btn 原语）
+						".dsm-trae-models{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--dsw-alias-border-l2,#36373b);padding-top:14px}",
+						".dsm-trae-models-head{display:flex;align-items:center;justify-content:space-between;gap:12px}",
+						".dsm-trae-models-title{margin:0;color:var(--dsw-alias-label-primary,#e6e6e6);font-size:14px;font-weight:600;line-height:20px}",
+						".dsm-trae-models-summary{margin:2px 0 0;color:var(--dsw-alias-label-tertiary,#999);font-size:12px;line-height:18px}",
+						".dsm-trae-model-list{display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:10px;overflow:hidden}",
+						".dsm-trae-model{display:grid;grid-template-columns:minmax(0,1fr);gap:7px;padding:10px 12px;background:var(--dsw-alias-bg-layer-2,#232529);transition:opacity .16s}",
+						".dsm-trae-model-disabled{opacity:.55}",
+						".dsm-trae-model+.dsm-trae-model{border-top:1px solid var(--dsw-alias-border-l2,#36373b)}",
+						".dsm-trae-model-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}",
+						".dsm-trae-model-enabled{display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer}",
+						".dsm-trae-model-enabled input{margin:0;accent-color:var(--dsw-alias-brand-primary,#5686fe);flex:none}",
+						".dsm-trae-model-copy{display:flex;align-items:baseline;gap:8px;min-width:0}",
+						".dsm-trae-model-name{display:inline-flex;align-items:baseline;gap:7px;color:var(--dsw-alias-label-primary,#e6e6e6);font-size:13px;font-weight:500;line-height:19px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+						".dsm-trae-model-meta{display:flex;align-items:center;gap:7px 12px;flex-wrap:wrap;color:var(--dsw-alias-label-tertiary,#999);font-size:11px;line-height:16px}",
+						".dsm-trae-model-options{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex:none}",
+						".dsm-trae-model-image{display:inline-flex;align-items:center;gap:4px;color:var(--dsw-alias-label-secondary,#c6c9d0);font-size:11px;line-height:16px;cursor:pointer}",
+						".dsm-trae-model-image input{margin:0;accent-color:var(--dsw-alias-brand-primary,#5686fe)}",
+						".dsm-trae-model-capability-note{margin:0;color:var(--dsw-alias-label-tertiary,#999);font-size:12px;line-height:18px}",
+						".dsm-trae-model-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--dsw-alias-border-l2,#36373b);padding-top:12px}",
+						".dsm-trae-model-actions-buttons{display:flex;align-items:center;justify-content:flex-end;gap:8px}",
+						".dsm-btn{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}",
+						".dsm-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px}",
+						".dsm-btn:disabled{opacity:.4;cursor:default}",
+						".dsm-btn-outline{border-color:var(--dsw-alias-border-l2,#36373b);background:transparent;color:var(--dsw-alias-label-primary,#e6e6e6)}",
+						".dsm-btn-outline:hover{border-color:var(--dsw-alias-label-dimmed,#777)}",
+						".dsm-btn-primary{background:var(--dsw-alias-brand-primary,#5686fe);color:#fff}",
+						".dsm-btn-primary:hover{filter:brightness(1.06)}",
 					].join("\n");
 					document.head.appendChild(style);
 				}
@@ -491,7 +714,7 @@ window.__ModuleLoader__.load({
 						name: slotName,
 						key,
 						priority: 30,
-						inject: () => ({})
+						inject: () => ({ settingsScope })
 					}, StatusCard));
 				};
 				register("plugins.bundle.config", "dsh-sensenova");

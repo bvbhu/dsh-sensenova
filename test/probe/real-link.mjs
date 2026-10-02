@@ -42,7 +42,6 @@ const scheduler = new Scheduler({
     return resolved.map((acc) => ({ ...acc, key: acc.key || key }))
   },
   options: {
-    get maxConcurrentPerAccount() { return options().maxConcurrentPerAccount },
     get accountCooldownMs() { return options().accountCooldownMs },
     get rateLimitMode() { return options().rateLimitMode },
   },

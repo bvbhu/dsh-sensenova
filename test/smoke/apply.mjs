@@ -43,7 +43,6 @@ const opts = resolveOptions(config)
 console.log('options:', {
   models: opts.models.map((m) => `${m.id}@${m.contextWindow}`).join(' / '),
   rateLimitMode: opts.rateLimitMode,
-  maxConcurrent: opts.maxConcurrentPerAccount,
 })
 
 // 非法配置：不应抛（lastGood 兜底在 apply 内；resolveOptions 直接抛）
@@ -63,7 +62,7 @@ for (const { fn } of ctx.effects ?? []) { try { fn() } catch {} }
 const injected = ctx.injected?.[0]
 console.log('注入服务:', injected?.services.join(','))
 console.log('注册路由:', injected?.sctx.webServer.registered.join(', '))
-if (injected?.sctx.webServer.registered.length !== 5) {
+if (injected?.sctx.webServer.registered.length !== 7) {
   console.error('管理路由数量不对')
   process.exit(1)
 }

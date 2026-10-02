@@ -54,7 +54,7 @@ test('成功路径：block-start → deltas → block-end → usage → finish',
   assert.equal(usage.usage.totalTokens, 7)
   const finish = chunks.at(-1)
   assert.equal(finish.type, 'finish')
-  assert.equal(finish.reason, 'stop')
+  assert.deepEqual(finish.reason, { kind: 'stop' })
 })
 
 test('429：账号冷却并换下一账号成功', async () => {

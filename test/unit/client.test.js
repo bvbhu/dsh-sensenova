@@ -50,7 +50,7 @@ test('SSE：文本流完整块序列', async () => {
   assert.equal(chunks[0].blockType, 'text')
   assert.equal(chunks[1].text, '你')
   assert.equal(chunks[3].block.text, '你好')
-  assert.equal(chunks[4].reason, 'stop')
+  assert.deepEqual(chunks[4].reason, { kind: 'stop' })
 })
 
 test('SSE：reasoning 与 text 双通道分块', async () => {
@@ -83,7 +83,7 @@ test('SSE：tool_calls 分片参数累积', async () => {
   const end = chunks.find((c) => c.type === 'block-end')
   assert.equal(end.block.type, 'tool-call')
   assert.equal(end.block.arguments, '{"city":"北京"}')
-  assert.equal(chunks.at(-1).reason, 'tool-calls')
+  assert.deepEqual(chunks.at(-1).reason, { kind: 'tool-calls' })
 })
 
 test('SSE：usage 独立块透传', async () => {
@@ -104,9 +104,9 @@ test('SSE：跨块分割的行与非法 JSON 容错', async () => {
   assert.equal(chunks.at(-1).type, 'finish')
 })
 
-test('SSE：finish_reason=length 映射', async () => {
+test('SSE：finish_reason=length 映射为 max-tokens', async () => {
   const chunks = await collect(parseSseText([sseText([
     { choices: [{ index: 0, delta: {}, finish_reason: 'length' }] },
   ])]))
-  assert.equal(chunks.at(-1).reason, 'length')
+  assert.deepEqual(chunks.at(-1).reason, { kind: 'max-tokens' })
 })
