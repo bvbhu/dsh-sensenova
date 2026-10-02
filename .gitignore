@@ -6,11 +6,14 @@ node_modules/
 
 # 运行产物
 *.log
+# 插件运行日志目录（本地运行残留，不入库）
+logs/
 
-# 限流报告目录：白名单模式，只跟踪 README 与参考测试文本
-# （keys.json 含明文 key；data/ 其余为实测生成结果，均不入库）
+# 限流与前缀缓存实测报告：只跟踪「可复现」的部分 —— README + scripts/
+# （脚本 + 脱敏后的 keys.json 示例）。
+# data/ 是实测生成结果（text-pool.txt 约 3.9MB），体积大拖慢下载，且可由
+# scripts/build-text-pool.mjs 重新生成，故不入库。
 sensenova-ratelimit-report/*
 !sensenova-ratelimit-report/README.md
-!sensenova-ratelimit-report/data/
-sensenova-ratelimit-report/data/*
-!sensenova-ratelimit-report/data/text-pool.txt
+!sensenova-ratelimit-report/scripts/
+sensenova-ratelimit-report/data/
