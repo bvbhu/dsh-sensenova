@@ -11,3 +11,8 @@ logs/
 
 # 实测输出和数据约 4MB
 sensenova-ratelimit-report/data/
+
+# keys.json 已跟踪（入库的是脱敏示例，clone 能拿到）；本地换成真实 key 后
+# 用 skip-worktree 屏蔽改动，防止误提交真实密钥：
+#   git update-index --skip-worktree sensenova-ratelimit-report/scripts/keys.json
+sensenova-ratelimit-report/scripts/keys.json
