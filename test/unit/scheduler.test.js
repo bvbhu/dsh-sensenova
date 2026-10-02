@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { Scheduler } from '../../lib/scheduler.js'
 import { parseSseText } from '../../lib/client.js'
 
-const OPTS = { accountCooldownMs: 60_000, rateLimitMode: 'failover-then-fail' }
+const OPTS = { accountCooldownMs: 60_000, retryIntervalMs: 20, rateLimitMode: 'failover-then-fail' }
 
 const SIMPLE_EVENTS = [
   { choices: [{ index: 0, delta: { content: '你' } }] },
@@ -72,7 +72,7 @@ test('429：账号冷却并换下一账号成功', async () => {
   assert.equal(calls, 2)
   assert.equal(chunks.at(-1).type, 'finish')
   assert.ok(s.accounts.get('ACC1').cooldownUntil > 0, 'ACC1 进入冷却')
-  assert.ok(s.lastRateLimit.get('ACC1') > 0)
+  assert.ok(s.lastRateLimit.get('ACC1')?.at > 0)
 })
 
 test('key 失效（401）：标记 dead 并换号', async () => {
@@ -133,6 +133,49 @@ test('wait-until-available：全池冷却时等待重扫直到成功', async () 
   const chunks = await collect(s.stream({}, {}))
   assert.ok(calls >= 3, `至少重试到第三发（实际 ${calls}）`)
   assert.equal(chunks.at(-1).type, 'finish')
+})
+
+test('429 归因 busy：空窗（无成功消耗）→ 短冷却 = retryIntervalMs', async () => {
+  const s = makeScheduler(async function* () { throw rateLimitError() }, [
+    { label: 'ACC1', key: 'sk-1', enabled: true },
+    { label: 'ACC2', key: 'sk-2', enabled: true },
+  ])
+  const t0 = Date.now()
+  await assert.rejects(() => collect(s.stream({}, {})), (error) => error.failure?.code === 'RATE_LIMIT')
+  const acc = s.accounts.get('ACC1')
+  const limit = s.lastRateLimit.get('ACC1')
+  assert.equal(limit.kind, 'busy')
+  assert.equal(limit.windowSpend, 0)
+  // 空窗 429 判服务侧繁忙：冷却 = 重试间隔（20ms），远短于 accountCooldownMs
+  assert.ok(acc.cooldownUntil - t0 <= 200, `短冷却（实际 ${acc.cooldownUntil - t0}ms）`)
+})
+
+test('429 归因 tpm：窗口内有成功消耗 → 冷却至滚动窗口释放（≈60s）', async () => {
+  const impl = async function* () {
+    yield { type: 'usage', usage: { inputTokens: 50_000, outputTokens: 100, cacheReadTokens: 0 } }
+    throw rateLimitError()
+  }
+  const s = makeScheduler(impl, [
+    { label: 'ACC1', key: 'sk-1', enabled: true },
+    { label: 'ACC2', key: 'sk-2', enabled: true },
+  ])
+  await assert.rejects(() => collect(s.stream({}, {})), (error) => error.failure?.code === 'RATE_LIMIT')
+  const acc = s.accounts.get('ACC1')
+  const limit = s.lastRateLimit.get('ACC1')
+  assert.equal(limit.kind, 'tpm')
+  // 记账：缓存未命中部分 + completion = 50000 + 100
+  assert.equal(limit.windowSpend, 50_100)
+  assert.ok(acc.cooldownUntil - limit.at >= 55_000, `TPM 冷却应接近满窗口（实际 ${acc.cooldownUntil - limit.at}ms）`)
+})
+
+test('TPM 记账：缓存命中 tokens 不计（实测命中不计 TPM）', async () => {
+  const impl = async function* () {
+    yield { type: 'usage', usage: { inputTokens: 50_000, outputTokens: 50, cacheReadTokens: 49_000 } }
+  }
+  const s = makeScheduler(impl, [{ label: 'ACC1', key: 'sk-1', enabled: true }])
+  await collect(s.stream({}, {}))
+  const acc = s.accounts.get('ACC1')
+  assert.equal(s.windowSpend(acc), 1000 + 50)
 })
 
 test('无可用账号（无 key）：failover 模式报 MISSING_CREDENTIAL', async () => {

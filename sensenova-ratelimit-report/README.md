@@ -70,6 +70,7 @@ cp data/text-pool-gutenberg-mdn.txt data/text-pool.txt        # Linux/macOS
 | `key-share-tpm.mjs`                                          | 同账号跨 key 是否共享 TPM 桶（需`acc3key1`/`acc3key2`）                                                            |
 | `cache-experiments.mjs repeat\|incremental\|affinity [offset]` | 前缀缓存三模式                                                                                                         |
 | `cache-cross-account.mjs warm\|conv [offset]`                 | 跨账号/跨 key 缓存可见性                                                                                               |
+| `cross-model-tpm.mjs [key别名] [模型A] [模型B] [--wait]`      | 同账号 A 模型打满 429 后立即调 B——判定限流桶按账号还是按 账号×模型（约 1 分钟，`--wait` 加窗口释放验证）                |
 | `lib.mjs`                                                    | 公共库：key 加载、`chat()`（默认连接池）、`makePinnedCaller()`（单连接钉连）、`makePayloadFactory()`、JSONL 日志 |
 
 ```bash
@@ -77,6 +78,7 @@ cd scripts
 node step0-models.mjs
 node rpm-tpm-harness.mjs
 node key-share-tpm.mjs
+node cross-model-tpm.mjs
 node cache-experiments.mjs repeat
 node cache-cross-account.mjs warm
 ```

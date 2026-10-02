@@ -143,11 +143,16 @@ window.__ModuleLoader__.load({
 		}
 
 		/** 合并状态徽章：冷却属于空闲的子态——key 异常时忙/闲/冷却都无意义。
-		 *  key 正常 + 在跑请求 = 使用中（主色）；key 正常 + 冷却中 = 冷却中 Xs（黄）；
+		 *  key 正常 + 在跑请求 = 使用中（主色）；冷却按 429 归因细分：
+		 *  空窗 429 = 服务繁忙（黄）；TPM 429 = TPM 冷却 Xs（黄）；
 		 *  key 正常 + 空闲 = 空闲（绿）；key 失效/缺失 = 红色错误态。 */
 		function statusBadge(account) {
 			if (account.keyStatus !== "ok") return badge(`key ${account.keyStatus}`, C.err, C.errBg);
-			if (account.cooldownRemainingMs > 0) return badge(`冷却中 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg);
+			if (account.cooldownRemainingMs > 0) {
+				return account.lastRateLimitKind === "busy"
+					? badge("服务繁忙", C.warn, C.warnBg)
+					: badge(`TPM 冷却 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg);
+			}
 			return account.busy ? badge("使用中", C.primary, "#e6f4ff") : badge("空闲", C.ok, C.okBg);
 		}
 
