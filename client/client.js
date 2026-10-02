@@ -108,12 +108,17 @@ window.__ModuleLoader__.load({
 		}
 
 		/** 账号管理区（照 sensenova-usage-dashboard 的 config-row 交互）：
-		 * 每行 = 账号名 + 用户名 + 密码 +「保存并登录」+「删」；保存即落凭据中心。 */
-		function AccountManager({ onChanged }) {
+		 * 每行 = 凭据标识符 + 用户名 + 密码 +「保存并登录」+「删」；保存即落凭据中心。
+		 * 凭据标识符 = 账号在凭据中心的命名前缀（如 ACC3 → SENSENOVA_ACC3_* refs）。 */
+		function AccountManager({ onChanged, existingLabels = [] }) {
 			const [rows, setRows] = react.useState(null);
 			const [notice, setNotice] = react.useState(void 0);
 			const [busy, setBusy] = react.useState(false);
 			const [open, setOpen] = react.useState(false);
+
+			// useCallback 捕获首帧闭包，而 existingLabels 异步加载——用 ref 保最新值
+			const existingRef = react.useRef(existingLabels);
+			existingRef.current = existingLabels;
 
 			const load = react.useCallback(async () => {
 				try {
@@ -121,7 +126,10 @@ window.__ModuleLoader__.load({
 					const accounts = value.accounts ?? [];
 					const editable = accounts.filter((a) => a.source === "credentials");
 					const list = editable.length > 0 ? editable : [];
-					setRows(list.map((a) => ({ label: a.label, username: a.hasUsername ? a.username ?? "" : "", password: "", hasPassword: a.hasPassword, hasKey: a.hasKey })));
+					setRows(list.length > 0
+						? list.map((a) => ({ label: a.label, username: a.hasUsername ? a.username ?? "" : "", password: "", hasPassword: a.hasPassword, hasKey: a.hasKey }))
+						// 首次使用：预填一行默认凭据标识符（ACC1 起跳过已有）
+						: [{ label: nextDefaultLabel(), username: "", password: "", hasPassword: false, hasKey: false }]);
 				} catch (e) {
 					setRows([]);
 					setNotice(`账号清单加载失败：${e?.message ?? e}`);
@@ -129,12 +137,22 @@ window.__ModuleLoader__.load({
 			}, []);
 			react.useEffect(() => { if (open) load(); }, [open, load]);
 
-			const emptyRow = () => ({ label: "", username: "", password: "", hasPassword: false, hasKey: false });
+			/** 新行的默认凭据标识符：ACC<n>，跳过已有（状态表 ∪ 已填行，忽略大小写）。 */
+			const nextDefaultLabel = () => {
+				const used = new Set(existingRef.current.map((label) => String(label).toUpperCase()));
+				for (const row of rows ?? []) {
+					if (row.label?.trim()) used.add(row.label.trim().toUpperCase());
+				}
+				let n = 1;
+				while (used.has(`ACC${n}`)) n += 1;
+				return `ACC${n}`;
+			};
+			const emptyRow = () => ({ label: nextDefaultLabel(), username: "", password: "", hasPassword: false, hasKey: false });
 			const setRow = (index, patch) => setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
 
 			const saveRow = async (index) => {
 				const row = rows[index];
-				if (!row.label.trim() || !row.username.trim()) { setNotice("账号名和用户名不能为空"); return; }
+				if (!row.label.trim() || !row.username.trim()) { setNotice("凭据标识符和用户名不能为空"); return; }
 				if (!row.password && !row.hasPassword) { setNotice("密码不能为空（首次保存必填）"); return; }
 				setBusy(true); setNotice("保存中…");
 				try {
@@ -171,7 +189,7 @@ window.__ModuleLoader__.load({
 					rows === null ? h("div", { style: { fontSize: 12, opacity: 0.6 } }, "加载中…") : null,
 					rows !== null ? rows.map((row, index) =>
 						h("div", { key: index, style: { display: "flex", gap: 6, alignItems: "center", marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid rgba(127,127,127,0.15)" } },
-							h("input", { style: { ...input, flex: "0 0 90px" }, placeholder: "账号名", value: row.label, onChange: (e) => setRow(index, { label: e.target.value }) }),
+							h("input", { style: { ...input, flex: "0 0 110px" }, placeholder: "凭据标识符（如 ACC3）", title: "账号在凭据中心的命名前缀，保存后凭据写入 SENSENOVA_<标识符>_USERNAME/_PASSWORD/_KEY refs（自动转大写）", value: row.label, onChange: (e) => setRow(index, { label: e.target.value }) }),
 							h("input", { style: { ...input, flex: 1 }, placeholder: "用户名", value: row.username, onChange: (e) => setRow(index, { username: e.target.value }) }),
 							h("input", { style: { ...input, flex: 1 }, type: "password", placeholder: row.hasPassword ? "已存凭据中心（留空不修改）" : "密码", value: row.password, onChange: (e) => setRow(index, { password: e.target.value }) }),
 							h("span", { style: { fontSize: 11 } },
@@ -182,7 +200,7 @@ window.__ModuleLoader__.load({
 					rows !== null
 						? h("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
 							h("button", { style: btn, disabled: busy, onClick: () => setRows((prev) => [...(prev ?? []), emptyRow()]) }, "＋ 添加账号"),
-							h("span", { style: { fontSize: 11, opacity: 0.65 } }, "保存在设置页填写的账号密码会写入凭据中心（SENSENOVA_* refs）并立即登录抓取 key；config 配置的账号（来源 settings）不在此显示，仍在配置里维护。"))
+							h("span", { style: { fontSize: 11, opacity: 0.65 } }, "凭据标识符 = 账号在凭据中心的命名前缀：保存后用户名/密码写入 SENSENOVA_<标识符>_USERNAME / _PASSWORD refs 并立即登录抓取 key（key 落 _KEY）。config 配置的账号（来源 settings）不在此显示，仍在配置里维护。"))
 						: null));
 		}
 
@@ -257,7 +275,7 @@ window.__ModuleLoader__.load({
 					? h("p", { style: { fontSize: 12, opacity: 0.7 } }, "还没有账号：展开下方「账号管理」填写用户名/密码（保存在凭据中心），或在 profile 的 cordis.patch.yml 中给 dsh-sensenova 行配置 accounts。")
 					: null,
 				view === "page"
-					? h(AccountManager, { onChanged: load })
+					? h(AccountManager, { onChanged: load, existingLabels: accounts.map((a) => a.label) })
 					: null,
 				logTail
 					? h("details", { style: { marginTop: 10 } },
