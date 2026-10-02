@@ -125,18 +125,20 @@ window.__ModuleLoader__.load({
 					h("span", null, `重置 ${fmtReset(pool.resetAt)} / ${pool.resetAt7d ? fmtReset(pool.resetAt7d) : "—"}`)));
 		}
 
-		/** 合并状态徽章：key 异常时忙/闲无意义——只有 key 正常才区分「使用中/空闲」。
-		 *  key 正常 + 在跑请求 = 使用中（主色）；key 正常 + 空闲 = 空闲（绿）；
-		 *  key 失效/缺失 = 红色错误态；冷却作为附加徽章叠加。 */
+		/** 合并状态徽章：冷却属于空闲的子态——key 异常时忙/闲/冷却都无意义。
+		 *  key 正常 + 在跑请求 = 使用中（主色）；key 正常 + 冷却中 = 冷却中 Xs（黄）；
+		 *  key 正常 + 空闲 = 空闲（绿）；key 失效/缺失 = 红色错误态。 */
 		function statusBadge(account) {
 			if (account.keyStatus !== "ok") return badge(`key ${account.keyStatus}`, C.err, C.errBg);
+			if (account.cooldownRemainingMs > 0) return badge(`冷却中 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg);
 			return account.busy ? badge("使用中", C.primary, "#e6f4ff") : badge("空闲", C.ok, C.okBg);
 		}
-		/** 卡头健康圆点：绿=空闲可用、蓝=使用中、红=key 异常、灰=停用。 */
+		/** 卡头健康圆点：绿=空闲可用、蓝=使用中、黄=冷却中、红=key 异常、灰=停用。 */
 		function healthDot(account) {
 			const color = !account.enabled ? "#d9d9d9"
 				: account.keyStatus !== "ok" ? C.err
-				: account.busy ? C.primary : C.ok;
+				: account.busy ? C.primary
+				: account.cooldownRemainingMs > 0 ? "#faad14" : C.ok;
 			return h("span", { style: { width: 8, height: 8, borderRadius: 4, background: color, display: "inline-block", flexShrink: 0 } });
 		}
 
@@ -159,7 +161,6 @@ window.__ModuleLoader__.load({
 						account.username || "无用户名")),
 				h("div", { style: cardBody },
 					h("div", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 2 } },
-						account.cooldownRemainingMs > 0 ? badge(`冷却 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg) : null,
 						h("span", { style: { fontSize: 11, opacity: 0.7 } }, `key 来源：${account.keySource}`),
 						h("span", { style: { fontSize: 11, ...muted, marginLeft: "auto" } }, `最近 429：${fmtTime(account.lastRateLimitAt)}`)),
 					pools.length === 0
