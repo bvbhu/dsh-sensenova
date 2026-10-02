@@ -1,0 +1,47 @@
+{
+  "name": "dsh-sensenova",
+  "version": "0.1.0",
+  "description": "SenseNova Token Plan account-pool provider for the DeepSeek Harness: multi-account scheduling, prefix-cache affinity, on-demand credential capture.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "lib",
+    "client",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
+  },
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"test/unit/*.test.js\"",
+    "smoke": "node test/smoke/patch.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@deepseek-ai/dsh-llm": "0.1.7-rc.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-llm": "0.1.7-rc.1",
+    "@deepseek-ai/schemastery": "3.18.4"
+  },
+  "dependencies": {
+    "jose": "^6.1.0"
+  }
+}

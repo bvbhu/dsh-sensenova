@@ -1,0 +1,15 @@
+# 依赖
+node_modules/
+
+# 限流报告内的敏感与生成物（keys.json 含明文 key，勿提交到任何仓库）
+sensenova-ratelimit-report/scripts/keys.json
+sensenova-ratelimit-report/data/
+sensenova-ratelimit-report/scripts/.probe-token.json
+sensenova-ratelimit-report/.workbuddy/
+
+# 运行产物
+*.log
+
+# 工作区数据
+.workbuddy/
+
