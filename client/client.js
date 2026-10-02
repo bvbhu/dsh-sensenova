@@ -97,7 +97,7 @@ window.__ModuleLoader__.load({
 		}
 
 		/** 单个积分池明细块（照 dashboard 账号明细）：5h/7d 用量条 + 剩余/使用率 + 重置时间。 */
-		function PoolBlock({ pool }) {
+		function PoolBlock({ pool, grantBalance }) {
 			const isDefault = pool.poolType === "default";
 			const tag = isDefault ? badge("通用", C.primary, "#e6f4ff") : badge("专属", "#389e0d", "#f6ffed");
 			const h5limit = pool.limit ?? 0;
@@ -122,7 +122,12 @@ window.__ModuleLoader__.load({
 				d7limit > 0 ? h(Bar, { pct: d7pct }) : null,
 				d7limit > 0 ? h("div", { style: row }, h("span", { style: labelStyle }, "剩余 / 使用率"), h("span", { style: valueStyle }, `${fmtNum(d7remaining)} · ${(100 - d7pct).toFixed(1)}%`)) : null,
 				h("div", { style: { ...row, marginTop: 4, opacity: 0.65 } },
-					h("span", null, `重置 ${fmtReset(pool.resetAt)} / ${pool.resetAt7d ? fmtReset(pool.resetAt7d) : "—"}`)));
+					h("span", null, `重置 ${fmtReset(pool.resetAt)}${d7limit > 0 ? ` / ${pool.resetAt7d ? fmtReset(pool.resetAt7d) : "—"}` : ""}`)),
+				isDefault && Number.isFinite(grantBalance)
+					? h("div", { style: { ...row, borderTop: "1px dashed #f0f0f0", paddingTop: 4, marginTop: 4 } },
+						h("span", { style: labelStyle }, "赠送余额"),
+						h("span", { style: valueStyle }, fmtNum(grantBalance)))
+					: null);
 		}
 
 		/** 合并状态徽章：冷却属于空闲的子态——key 异常时忙/闲/冷却都无意义。
@@ -133,16 +138,8 @@ window.__ModuleLoader__.load({
 			if (account.cooldownRemainingMs > 0) return badge(`冷却中 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg);
 			return account.busy ? badge("使用中", C.primary, "#e6f4ff") : badge("空闲", C.ok, C.okBg);
 		}
-		/** 卡头健康圆点：绿=空闲可用、蓝=使用中、黄=冷却中、红=key 异常、灰=停用。 */
-		function healthDot(account) {
-			const color = !account.enabled ? "#d9d9d9"
-				: account.keyStatus !== "ok" ? C.err
-				: account.busy ? C.primary
-				: account.cooldownRemainingMs > 0 ? "#faad14" : C.ok;
-			return h("span", { style: { width: 8, height: 8, borderRadius: 4, background: color, display: "inline-block", flexShrink: 0 } });
-		}
 
-		/** 账号卡片：头部（健康点 + 标识符 + 用户名 + 状态徽章）+ 每积分池明细块 + 赠送余额。 */
+		/** 账号卡片：头部（标识符 + 用户名 + 状态徽章）+ 每积分池明细块（赠送余额并入通用池）。 */
 		function AccountCard({ account }) {
 			const usage = account.usage;
 			const pools = usage?.pools ?? [];
@@ -153,7 +150,6 @@ window.__ModuleLoader__.load({
 			return h("div", { style: card, className: "dsh-sensenova-card" },
 				h("div", { style: cardHeader, className: "dsh-sensenova-card-header" },
 					h("span", { style: { display: "flex", alignItems: "center", gap: 7, minWidth: 0 } },
-						healthDot(account),
 						h("strong", null, account.label),
 						account.enabled ? null : badge("已停用", "#9ca3af"),
 						statusBadge(account)),
@@ -165,12 +161,10 @@ window.__ModuleLoader__.load({
 						h("span", { style: { fontSize: 11, ...muted, marginLeft: "auto" } }, `最近 429：${fmtTime(account.lastRateLimitAt)}`)),
 					pools.length === 0
 						? h("div", { style: { fontSize: 12, ...muted, padding: "6px 0" } }, "余量未拉取：点上方「刷新」拉取积分池用量")
-						: pools.map((pool, i) => h(PoolBlock, { key: i, pool })),
-					usage && Number.isFinite(usage.grantBalance)
-						? h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 11.5, marginTop: 6, paddingTop: 6, borderTop: "1px dashed #f0f0f0" } },
-							h("span", { style: muted }, "赠送余额"),
-							h("span", { style: { fontWeight: 500 } }, fmtNum(usage.grantBalance)))
-						: null));
+						: pools.map((pool, i) => h(PoolBlock, {
+							key: i, pool,
+							grantBalance: pool.poolType === "default" ? usage?.grantBalance : undefined,
+						}))));
 		}
 
 		/** 账号管理区（照 sensenova-usage-dashboard 的 config-row 交互）：
