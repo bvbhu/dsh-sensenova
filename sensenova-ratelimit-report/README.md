@@ -3,6 +3,7 @@
 - 测试日期：2026-10-01 ~ 10-02（round 1 + round 2）
 - 端点：`https://token.sensenova.cn/v1/chat/completions`（OpenAI 兼容）
 - 原始数据：`data/results-round1.jsonl`（round 1，限流四阶段）、`data/results-round2.jsonl`（round 2，全部模型）
+- 入库范围：git 仓库仅跟踪本 README 与参考测试文本 `data/text-pool.txt`；其余数据、脚本与 `keys.json`（明文 key）仅存本地，不入库
 
 ## 一、结论速览
 

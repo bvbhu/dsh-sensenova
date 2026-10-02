@@ -1,15 +1,16 @@
 # 依赖
 node_modules/
 
-# 限流报告内的敏感与生成物（keys.json 含明文 key，勿提交到任何仓库）
-sensenova-ratelimit-report/scripts/keys.json
-sensenova-ratelimit-report/data/
-sensenova-ratelimit-report/scripts/.probe-token.json
-sensenova-ratelimit-report/.workbuddy/
+# 工作区数据
+.workbuddy/
 
 # 运行产物
 *.log
 
-# 工作区数据
-.workbuddy/
-
+# 限流报告目录：白名单模式，只跟踪 README 与参考测试文本
+# （keys.json 含明文 key；data/ 其余为实测生成结果，均不入库）
+sensenova-ratelimit-report/*
+!sensenova-ratelimit-report/README.md
+!sensenova-ratelimit-report/data/
+sensenova-ratelimit-report/data/*
+!sensenova-ratelimit-report/data/text-pool.txt
