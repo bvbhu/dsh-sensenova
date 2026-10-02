@@ -9,11 +9,5 @@ node_modules/
 # 插件运行日志目录（本地运行残留，不入库）
 logs/
 
-# 限流与前缀缓存实测报告：只跟踪「可复现」的部分 —— README + scripts/
-# （脚本 + 脱敏后的 keys.json 示例）。
-# data/ 是实测生成结果（text-pool.txt 约 3.9MB），体积大拖慢下载，且可由
-# scripts/build-text-pool.mjs 重新生成，故不入库。
-sensenova-ratelimit-report/*
-!sensenova-ratelimit-report/README.md
-!sensenova-ratelimit-report/scripts/
+# 实测输出和数据约 4MB
 sensenova-ratelimit-report/data/

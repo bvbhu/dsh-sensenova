@@ -195,9 +195,7 @@ window.__ModuleLoader__.load({
 			const load = react.useCallback(async () => {
 				try {
 					const value = await request("GET", ACCOUNTS_PATH);
-					const accounts = value.accounts ?? [];
-					const editable = accounts.filter((a) => a.source === "credentials");
-					const list = editable.length > 0 ? editable : [];
+					const list = value.accounts ?? [];
 					setRows(list.length > 0
 						? list.map((a) => ({ label: a.label, username: a.hasUsername ? a.username ?? "" : "", password: "", hasPassword: a.hasPassword, hasKey: a.hasKey }))
 						// 首次使用：预填一行默认凭据标识符（ACC1 起跳过已有）
@@ -271,7 +269,7 @@ window.__ModuleLoader__.load({
               userSelect: "none",
             },
           },
-          "账号管理（保存在凭据中心，不进配置文件）",
+          "账号管理（保存在凭据中心）",
         ),
         h(
           "div",
@@ -380,7 +378,7 @@ window.__ModuleLoader__.load({
                 h(
                   "span",
                   { style: { fontSize: 11, opacity: 0.65, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, title: "凭据标识符 = 凭据中心 ref 的命名前缀（如 ACC1 → SENSENOVA_ACC1_USERNAME / _PASSWORD / _KEY）" },
-                  "标识符 ACC<n> = 凭据中心 ref 前缀；保存即写入并登录抓 key；config 账号仍在配置里维护",
+                  "标识符 ACC<n> = 凭据中心 ref 前缀；保存即写入并登录抓 key",
                 ),
               )
             : null,
@@ -634,7 +632,7 @@ const imageIds = models.filter((m) => pick(m.id).image).map((m) => m.id);
 						key: a.label, account: { ...a, usage: status?.usage?.[a.label] }
 					}))),
 				accounts.length === 0
-					? h("p", { style: { fontSize: 12, opacity: 0.7 } }, "还没有账号：展开下方「账号管理」填写用户名/密码（保存在凭据中心），或在 profile 的 cordis.patch.yml 中给 dsh-sensenova 行配置 accounts。")
+					? h("p", { style: { fontSize: 12, opacity: 0.7 } }, "还没有账号：展开下方「账号管理」填写用户名/密码（保存在凭据中心）。")
 					: null,
 				view === "page"
 					? h(AccountManager, { onChanged: load, existingLabels: accounts.map((a) => a.label) })

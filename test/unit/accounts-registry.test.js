@@ -1,5 +1,5 @@
 /**
- * 页面账号注册表（凭据中心）与骨架合并的单测。
+ * 账号注册表（凭据中心）的单测。
  *
  * @module test/unit/accounts-registry.test.js
  */
@@ -11,7 +11,6 @@ import {
   ACCOUNTS_REGISTRY_REF,
   loadAccountRegistry,
   saveAccountRegistry,
-  mergeAccountSkeletons,
   refNames,
 } from '../../lib/credentials.js'
 
@@ -60,35 +59,12 @@ test('注册表：saveAccountRegistry 在凭据中心未挂载时抛错', async 
   await assert.rejects(() => saveAccountRegistry(undefined, []), /凭据中心未挂载/)
 })
 
-test('骨架合并：config 优先，注册表按 label 去重补入，enabled 透传', () => {
-  const merged = mergeAccountSkeletons(
-    [
-      { label: 'acc1', enabled: true },                 // 大小写归一后与注册表 ACC1 撞 label
-      { label: 'ACC2', enabled: false },
-    ],
-    [
-      { label: 'ACC1', enabled: false },                // 撞 config 的 acc1 → 忽略
-      { label: 'ACC3', enabled: false },
-    ],
-  )
-  assert.deepEqual(merged, [
-    { label: 'acc1', enabled: true },
-    { label: 'ACC2', enabled: false },
-    { label: 'ACC3', enabled: false },
-  ])
-})
-
-test('骨架合并：空 config 时注册表条目全部生效', () => {
-  const merged = mergeAccountSkeletons([], [{ label: 'ACC9', enabled: true }])
-  assert.deepEqual(merged, [{ label: 'ACC9', enabled: true }])
-})
-
 test('注册表账号的 username/password 走既有 SENSENOVA_<LABEL>_* refs', async () => {
   const credentials = fakeCredentials({
     SENSENOVA_ACC7_USERNAME: 'user7',
     SENSENOVA_ACC7_PASSWORD: 'pass7',
   })
-  const skeleton = mergeAccountSkeletons([], [{ label: 'ACC7', enabled: true }])
+  const skeleton = [{ label: 'ACC7', enabled: true }]
   const [acc] = await import('../../lib/credentials.js').then((m) => m.resolveAccounts(skeleton, credentials))
   assert.equal(acc.label, 'ACC7')
   assert.equal(acc.username, 'user7')

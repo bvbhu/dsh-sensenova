@@ -26,19 +26,18 @@ if (!key) {
 }
 
 const rawConfig = {
-  accounts: [{ label: 'ACC1' }],
   baseUrl: 'https://token.sensenova.cn/v1',
 }
+// 账号清单不再来自 config（config.accounts 已移除）：探针直接给骨架。
+const skeleton = [{ label: 'ACC1', enabled: true }]
 const options = () => {
-  if (!options.cached) {
-    options.cached = { ...resolveOptions(rawConfig), accounts: rawConfig.accounts }
-  }
+  if (!options.cached) options.cached = resolveOptions(rawConfig)
   return options.cached
 }
 
 const scheduler = new Scheduler({
   listAccounts: async () => {
-    const resolved = await resolveAccounts(options().accounts, undefined)
+    const resolved = await resolveAccounts(skeleton, undefined)
     return resolved.map((acc) => ({ ...acc, key: acc.key || key }))
   },
   options: {

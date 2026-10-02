@@ -26,10 +26,6 @@ const ctx = {
 
 const config = {
   enabled: true,
-  accounts: [
-    { label: 'ACC1', username: 'u1', password: 'p1', key: '' },
-    { label: 'ACC2', key: 'sk-test', enabled: true },
-  ],
 }
 
 apply(ctx, config)

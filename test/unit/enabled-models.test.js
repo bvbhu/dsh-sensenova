@@ -10,7 +10,6 @@ import assert from 'node:assert/strict'
 import { resolveOptions } from '../../lib/index.js'
 
 const base = {
-  accounts: [],
   models: [
     { id: 'deepseek-v4-flash', contextWindow: 1000000 },
     { id: 'sensenova-6.8-flash-lite', contextWindow: 256000 },
