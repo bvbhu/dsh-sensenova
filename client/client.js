@@ -28,8 +28,12 @@ window.__ModuleLoader__.load({
 		const STATUS_PATH = "/api/dsh-sensenova/status";
 		const USAGE_PATH = "/api/dsh-sensenova/refresh-usage";
 		const REFETCH_PATH = "/api/dsh-sensenova/refetch-key";
+		const ACCOUNTS_PATH = "/api/dsh-sensenova/accounts";
 		const POLL_MS = 30_000;
 
+		// 配色照 sensenova-usage-dashboard（Ant 风格）：主色 #0958d9，
+		// 成功 #52c41a / 警告 #faad14 / 错误 #f5222d + 对应浅底徽章。
+		const C = { primary: "#0958d9", ok: "#52c41a", okBg: "#e6f7e6", warn: "#ad6800", warnBg: "#fffbe6", err: "#f5222d", errBg: "#fff1f0" };
 		const fmtTime = (ms) => {
 			if (!ms) return "—";
 			const d = new Date(ms);
@@ -46,35 +50,51 @@ window.__ModuleLoader__.load({
 			if (!response.ok || data.ok === false) throw new Error(data.error ?? `HTTP ${response.status}`);
 			return data.value;
 		};
+		const request = async (method, path, body) => {
+			const response = await fetch(path, {
+				method,
+				headers: body === undefined ? void 0 : { "Content-Type": "application/json" },
+				body: body === undefined ? void 0 : JSON.stringify(body),
+			});
+			const data = await response.json().catch(() => ({}));
+			if (!response.ok || data.ok === false) throw new Error(data.error ?? `HTTP ${response.status}`);
+			return data.value;
+		};
 
 		const labelCell = { padding: "6px 10px", borderBottom: "1px solid var(--dsh-border, #e5e7eb)", whiteSpace: "nowrap", textAlign: "left" };
-		const th = { ...labelCell, fontWeight: 600, fontSize: 12, opacity: 0.75 };
+		const th = { ...labelCell, fontWeight: 600, fontSize: 12, opacity: 0.75, background: "rgba(127,127,127,0.06)" };
 		const btn = {
-			padding: "2px 10px", margin: "0 4px 0 0", fontSize: 12, cursor: "pointer",
-			border: "1px solid var(--dsh-border, #d1d5db)", borderRadius: 6, background: "transparent"
+			padding: "3px 12px", margin: "0 4px 0 0", fontSize: 12, cursor: "pointer",
+			border: "1px solid #d9d9d9", borderRadius: 6, background: "#fff", transition: "all 0.2s"
 		};
-		const badge = (text, color) => h("span", {
+		const btnPrimary = { ...btn, background: C.primary, borderColor: C.primary, color: "#fff" };
+		const input = {
+			padding: "4px 8px", border: "1px solid #d9d9d9", borderRadius: 4,
+			fontSize: 12, width: "100%", boxSizing: "border-box"
+		};
+		const badge = (text, fg, bg) => h("span", {
 			style: {
 				fontSize: 11, padding: "1px 8px", borderRadius: 999,
-				border: `1px solid ${color}`, color
+				border: `1px solid ${fg}`, color: fg, background: bg ?? "transparent"
 			}
 		}, text);
 
 		function AccountRow({ account, busy, onRefreshUsage, onRefetchKey }) {
-			const keyColor = account.keyStatus === "ok" ? "#16a34a" : "#dc2626";
 			const credits = account.usage?.pools?.find((p) => p.poolType === "default");
 			return h("tr", null,
 				h("td", { style: labelCell }, h("strong", null, account.label),
 					account.enabled ? null : badge("已停用", "#9ca3af")),
 				h("td", { style: labelCell },
-					badge(account.keyStatus === "ok" ? "key 正常" : `key ${account.keyStatus}`, keyColor), " ",
+					account.keyStatus === "ok"
+						? badge("key 正常", C.ok, C.okBg)
+						: badge(`key ${account.keyStatus}`, C.err, C.errBg), " ",
 					h("span", { style: { fontSize: 11, opacity: 0.7 } }, account.keySource)),
 				h("td", { style: labelCell }, account.credSource),
 				h("td", { style: labelCell },
-					account.busy ? badge("忙", "#d97706") : badge("闲", "#16a34a")),
+					account.busy ? badge("忙", C.warn, C.warnBg) : badge("闲", C.ok, C.okBg)),
 				h("td", { style: labelCell },
 					account.cooldownRemainingMs > 0
-						? badge(`${Math.ceil(account.cooldownRemainingMs / 1000)}s`, "#d97706")
+						? badge(`${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg)
 						: "—"),
 				h("td", { style: labelCell },
 					credits
@@ -85,6 +105,85 @@ window.__ModuleLoader__.load({
 					h("button", { style: btn, disabled: busy, onClick: () => onRefreshUsage(account.label) }, "刷新余量"),
 					h("button", { style: btn, disabled: busy, onClick: () => onRefetchKey(account.label) }, "重抓 key"))
 			);
+		}
+
+		/** 账号管理区（照 sensenova-usage-dashboard 的 config-row 交互）：
+		 * 每行 = 账号名 + 用户名 + 密码 +「保存并登录」+「删」；保存即落凭据中心。 */
+		function AccountManager({ onChanged }) {
+			const [rows, setRows] = react.useState(null);
+			const [notice, setNotice] = react.useState(void 0);
+			const [busy, setBusy] = react.useState(false);
+			const [open, setOpen] = react.useState(false);
+
+			const load = react.useCallback(async () => {
+				try {
+					const value = await request("GET", ACCOUNTS_PATH);
+					const accounts = value.accounts ?? [];
+					const editable = accounts.filter((a) => a.source === "credentials");
+					const list = editable.length > 0 ? editable : [];
+					setRows(list.map((a) => ({ label: a.label, username: a.hasUsername ? a.username ?? "" : "", password: "", hasPassword: a.hasPassword, hasKey: a.hasKey })));
+				} catch (e) {
+					setRows([]);
+					setNotice(`账号清单加载失败：${e?.message ?? e}`);
+				}
+			}, []);
+			react.useEffect(() => { if (open) load(); }, [open, load]);
+
+			const emptyRow = () => ({ label: "", username: "", password: "", hasPassword: false, hasKey: false });
+			const setRow = (index, patch) => setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+
+			const saveRow = async (index) => {
+				const row = rows[index];
+				if (!row.label.trim() || !row.username.trim()) { setNotice("账号名和用户名不能为空"); return; }
+				if (!row.password && !row.hasPassword) { setNotice("密码不能为空（首次保存必填）"); return; }
+				setBusy(true); setNotice("保存中…");
+				try {
+					const result = await request("POST", ACCOUNTS_PATH, {
+						label: row.label.trim(), username: row.username.trim(), password: row.password || undefined,
+					});
+					setNotice(result.keyUpdated
+						? `账号 ${result.label} 已保存并登录成功（key 已落凭据中心）`
+						: `账号 ${result.label} 凭据已保存，但登录抓 key 失败：${result.loginError}（空池回合会自动重试）`);
+					await load();
+					onChanged?.();
+				} catch (e) {
+					setNotice(`保存失败：${e?.message ?? e}`);
+				} finally { setBusy(false); }
+			};
+
+			const removeRow = async (index) => {
+				const row = rows[index];
+				if (!window.confirm(`从账号清单移除 ${row.label}？（凭据中心 refs 保留）`)) return;
+				setBusy(true); setNotice(void 0);
+				try {
+					await request("DELETE", ACCOUNTS_PATH, { label: row.label });
+					await load();
+					onChanged?.();
+				} catch (e) {
+					setNotice(`移除失败：${e?.message ?? e}`);
+				} finally { setBusy(false); }
+			};
+
+			return h("details", { style: { marginTop: 12 }, open, onToggle: (e) => setOpen(e.target.open) },
+				h("summary", { style: { fontSize: 12, cursor: "pointer", opacity: 0.85, userSelect: "none" } }, "账号管理（保存在凭据中心，不进配置文件）"),
+				h("div", { style: { padding: "8px 2px" } },
+					notice ? h("div", { style: { fontSize: 12, color: notice.includes("失败") || notice.includes("不能为空") ? C.err : C.ok, margin: "4px 0 8px" } }, notice) : null,
+					rows === null ? h("div", { style: { fontSize: 12, opacity: 0.6 } }, "加载中…") : null,
+					rows !== null ? rows.map((row, index) =>
+						h("div", { key: index, style: { display: "flex", gap: 6, alignItems: "center", marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid rgba(127,127,127,0.15)" } },
+							h("input", { style: { ...input, flex: "0 0 90px" }, placeholder: "账号名", value: row.label, onChange: (e) => setRow(index, { label: e.target.value }) }),
+							h("input", { style: { ...input, flex: 1 }, placeholder: "用户名", value: row.username, onChange: (e) => setRow(index, { username: e.target.value }) }),
+							h("input", { style: { ...input, flex: 1 }, type: "password", placeholder: row.hasPassword ? "已存凭据中心（留空不修改）" : "密码", value: row.password, onChange: (e) => setRow(index, { password: e.target.value }) }),
+							h("span", { style: { fontSize: 11 } },
+								row.hasKey ? badge("有 key", C.ok, C.okBg) : badge("无 key", C.warn, C.warnBg)),
+							h("button", { style: btnPrimary, disabled: busy, onClick: () => saveRow(index) }, "保存并登录"),
+							h("button", { style: { ...btn, color: C.err }, disabled: busy, onClick: () => removeRow(index) }, "删")))
+						: null,
+					rows !== null
+						? h("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+							h("button", { style: btn, disabled: busy, onClick: () => setRows((prev) => [...(prev ?? []), emptyRow()]) }, "＋ 添加账号"),
+							h("span", { style: { fontSize: 11, opacity: 0.65 } }, "保存在设置页填写的账号密码会写入凭据中心（SENSENOVA_* refs）并立即登录抓取 key；config 配置的账号（来源 settings）不在此显示，仍在配置里维护。"))
+						: null));
 		}
 
 		function StatusCard({ view }) {
@@ -155,7 +254,10 @@ window.__ModuleLoader__.load({
 						busy, onRefreshUsage, onRefetchKey
 					})))),
 				accounts.length === 0
-					? h("p", { style: { fontSize: 12, opacity: 0.7 } }, "还没有账号：在 profile 的 cordis.patch.yml 中给 dsh-sensenova 行配置 accounts（label + 用户名/密码，key 会自动登录抓取）。")
+					? h("p", { style: { fontSize: 12, opacity: 0.7 } }, "还没有账号：展开下方「账号管理」填写用户名/密码（保存在凭据中心），或在 profile 的 cordis.patch.yml 中给 dsh-sensenova 行配置 accounts。")
+					: null,
+				view === "page"
+					? h(AccountManager, { onChanged: load })
 					: null,
 				logTail
 					? h("details", { style: { marginTop: 10 } },

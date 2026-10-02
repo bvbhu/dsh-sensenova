@@ -63,7 +63,7 @@ for (const { fn } of ctx.effects ?? []) { try { fn() } catch {} }
 const injected = ctx.injected?.[0]
 console.log('注入服务:', injected?.services.join(','))
 console.log('注册路由:', injected?.sctx.webServer.registered.join(', '))
-if (injected?.sctx.webServer.registered.length !== 4) {
+if (injected?.sctx.webServer.registered.length !== 5) {
   console.error('管理路由数量不对')
   process.exit(1)
 }
