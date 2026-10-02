@@ -412,7 +412,15 @@ window.__ModuleLoader__.load({
 					setError(void 0);
 				}
 				setModels(fresh);
-				setDraft(null);
+				// 刷新/加载不清空未保存的勾选：只保留「仍存在于新目录」的草稿项，
+				// 已从目录移除的模型自动剔除（启用状态以目录为准）。
+				setDraft((prev) => {
+					if (!prev) return prev;
+					const ids = new Set(fresh.map((m) => m.id));
+					const next = {};
+					for (const [id, state] of Object.entries(prev)) if (ids.has(id)) next[id] = state;
+					return next;
+				});
 				if (!silent) setNotice("模型目录已刷新");
 			}, []);
 
@@ -521,11 +529,11 @@ const imageIds = models.filter((m) => pick(m.id).image).map((m) => m.id);
 										h("span", null, "图像模型")))),
 							h("div", { className: "dsm-trae-model-meta" },
 								m.contextWindow ? h("span", null, `上下文 ${fmtCapacity(m.contextWindow)}`) : null,
-								m.maxTokens ? h("span", null, `输出 ${fmtCapacity(m.maxTokens)}`) : null)))));
-h("div", { className: "dsm-trae-model-actions" },
-					h("span", { className: "dsm-trae-model-capability-note" }, "勾选「启用」决定使用的模型；图像模型默认按 API 返回值判断，API 漏标时可手动勾选「图像模型」补上（手动指定的不会被目录刷新覆盖）。"),
-					h("div", { className: "dsm-trae-model-actions-buttons" },
-						h("button", { type: "button", className: "dsm-btn dsm-btn-primary", disabled: busy, onClick: save }, busy ? "保存中…" : "保存勾选")));
+								m.maxTokens ? h("span", null, `输出 ${fmtCapacity(m.maxTokens)}`) : null)))),
+					h("div", { className: "dsm-trae-model-actions" },
+						h("span", { className: "dsm-trae-model-capability-note" }, "勾选「启用」决定使用的模型；图像模型默认按 API 返回值判断，API 漏标时可手动勾选「图像模型」补上（手动指定的不会被目录刷新覆盖）。"),
+						h("div", { className: "dsm-trae-model-actions-buttons" },
+							h("button", { type: "button", className: "dsm-btn dsm-btn-primary", disabled: busy, onClick: save }, busy ? "保存中…" : "保存勾选"))));
 		}
 		function StatusCard({ view, settingsScope }) {
 			const [status, setStatus] = react.useState(null);

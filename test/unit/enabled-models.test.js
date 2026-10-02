@@ -37,3 +37,19 @@ test('enabledModels 中的未知 id 被忽略；空白项清洗', () => {
 test('enabledModels 全部未知 = 空模型列表（不回退到全量）', () => {
   assert.deepEqual(resolveOptions({ ...base, enabledModels: ['nope'] }).models, [])
 })
+
+test('configCatalog = 配置声明目录（用于判定"手动指定的图像模型"，不被 API 发现结果污染）', () => {
+  const opts = resolveOptions(base)
+  assert.deepEqual(opts.configCatalog.map((m) => m.id), ['deepseek-v4-flash', 'sensenova-6.8-flash-lite', 'kimi-k3'])
+  // configCatalog 与 catalog 同源（都来自 config.models），供 discover 的
+  // merge 用「配置显式声明」判定手动指定，避免把 API 标注误判成手动指定
+  assert.deepEqual(opts.configCatalog, opts.catalog)
+})
+
+test('imageModels：手动指定的图像模型解析为 Set（留空 = 空集）', () => {
+  assert.equal(resolveOptions(base).imageModelIds.size, 0)
+  assert.equal(resolveOptions({ ...base, imageModels: [] }).imageModelIds.size, 0)
+  const opts = resolveOptions({ ...base, imageModels: [' kimi-k3 ', 'kimi-k3', ''] })
+  assert.equal(opts.imageModelIds.size, 1, '去重 + 清洗空白项')
+  assert.ok(opts.imageModelIds.has('kimi-k3'))
+})
