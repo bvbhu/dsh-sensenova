@@ -463,25 +463,27 @@ window.__ModuleLoader__.load({
 				setBusy(true); setNotice(void 0);
 				try {
 const enabledIds = models.filter((m) => pick(m.id).enabled).map((m) => m.id);
+					// 手动指定的图像模型（API 未标注但确支持图像输入时勾选，
+					// 刷新目录不会被 API 覆盖）
+const imageIds = models.filter((m) => pick(m.id).image).map((m) => m.id);
 					// 写回配置：Host 端点优先（settings.mutate 在宿主进程内执行，
 					// 唯一可靠写者；照 dsh-connect-workbuddy 的 __save 模式），
-					// scope.set 只作镜像刷新兜底。模态由 API 决定，只写 enabledModels。
-					{
-						const field = "enabledModels";
+					// scope.set 只作镜像刷新兜底。写 enabledModels + imageModels。
+					for (const [field, value] of [["enabledModels", enabledIds], ["imageModels", imageIds]]) {
 						let landed = false;
 						try {
-							const result = await post(SAVE_CONFIG_PATH, { field, value: enabledIds });
+							const result = await post(SAVE_CONFIG_PATH, { field, value });
 							landed = result?.ok !== false;
 						} catch (hostError) {
 							if (settingsScope === void 0) throw hostError;
-							if (await settingsScope.set(field, enabledIds) === false) throw new Error(`${field} 写入被拒绝（Host 端点与 scope 均失败）`);
+							if (await settingsScope.set(field, value) === false) throw new Error(`${field} 写入被拒绝（Host 端点与 scope 均失败）`);
 							const readBack = unwrapVolatile(settingsScope.getSnapshot().value)?.[field];
-							landed = Array.isArray(readBack) && readBack.length === enabledIds.length && enabledIds.every((id) => readBack.includes(id));
+							landed = Array.isArray(readBack) && readBack.length === value.length && value.every((id) => readBack.includes(id));
 							if (!landed) throw new Error(`${field} 未落盘（回读校验失败）`);
 						}
 						if (!landed) throw new Error(`${field} 写入未确认落盘`);
 					}
-					setNotice(`已保存：启用 ${enabledIds.length} 个模型`);
+					setNotice(`已保存：启用 ${enabledIds.length} 个模型，其中 ${imageIds.length} 个手动指定为图像模型`);
 					setDraft(null);
 					await load(true);
 				} catch (e) {
@@ -514,14 +516,14 @@ const enabledIds = models.filter((m) => pick(m.id).enabled).map((m) => m.id);
 									h("span", { className: "dsm-trae-model-copy" },
 										h("span", { className: "dsm-trae-model-name" }, m.name || m.id))),
 								h("div", { className: "dsm-trae-model-options" },
-									m.inputModalities && m.inputModalities.includes("image")
-										? h("span", { style: { fontSize: 11, opacity: 0.75 } }, "视觉输入")
-										: null)),
+									h("label", { className: "dsm-trae-model-image" },
+										h("input", { type: "checkbox", checked: pick(m.id).image, disabled: busy || !pick(m.id).enabled, onChange: () => toggle(m.id, "image") }),
+										h("span", null, "图像模型")))),
 							h("div", { className: "dsm-trae-model-meta" },
 								m.contextWindow ? h("span", null, `上下文 ${fmtCapacity(m.contextWindow)}`) : null,
 								m.maxTokens ? h("span", null, `输出 ${fmtCapacity(m.maxTokens)}`) : null)))));
 h("div", { className: "dsm-trae-model-actions" },
-					h("span", { className: "dsm-trae-model-capability-note" }, "勾选「启用」决定使用的模型；图像模态由 API 返回值自动判断。"),
+					h("span", { className: "dsm-trae-model-capability-note" }, "勾选「启用」决定使用的模型；图像模型默认按 API 返回值判断，API 漏标时可手动勾选「图像模型」补上（手动指定的不会被目录刷新覆盖）。"),
 					h("div", { className: "dsm-trae-model-actions-buttons" },
 						h("button", { type: "button", className: "dsm-btn dsm-btn-primary", disabled: busy, onClick: save }, busy ? "保存中…" : "保存勾选")));
 		}
