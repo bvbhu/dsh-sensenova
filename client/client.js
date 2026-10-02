@@ -39,7 +39,6 @@ window.__ModuleLoader__.load({
 			const d = new Date(ms);
 			return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 		};
-		const fmtPct = (ratio) => (ratio === undefined || ratio === null ? "—" : `${Math.round(ratio * 100)}%`);
 		const post = async (path, body) => {
 			const response = await fetch(path, {
 				method: "POST",
@@ -61,8 +60,6 @@ window.__ModuleLoader__.load({
 			return data.value;
 		};
 
-		const labelCell = { padding: "6px 10px", borderBottom: "1px solid var(--dsh-border, #e5e7eb)", whiteSpace: "nowrap", textAlign: "left" };
-		const th = { ...labelCell, fontWeight: 600, fontSize: 12, opacity: 0.75, background: "rgba(127,127,127,0.06)" };
 		const btn = {
 			padding: "3px 12px", margin: "0 4px 0 0", fontSize: 12, cursor: "pointer",
 			border: "1px solid #d9d9d9", borderRadius: 6, background: "#fff", transition: "all 0.2s"
@@ -79,32 +76,56 @@ window.__ModuleLoader__.load({
 			}
 		}, text);
 
-		function AccountRow({ account, busy, onRefreshUsage, onRefetchKey }) {
+		// 配色照 sensenova-usage-dashboard：用量 <60% 绿 / <85% 黄 / 其余红
+		const colorForPct = (pct) => (pct < 60 ? C.ok : pct < 85 ? "#faad14" : C.err);
+
+		/** 圆环仪表（dashboard gauge 的 JSX 版）：pct = 已用百分比。 */
+		function RingGauge({ pct, color, size = 68, caption }) {
+			const r = size / 2 - 6;
+			const c = 2 * Math.PI * r;
+			return h("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0 } },
+				h("svg", { width: size, height: size },
+					h("circle", { cx: size / 2, cy: size / 2, r, fill: "none", stroke: "#eee", strokeWidth: 6 }),
+					pct === null ? null :
+						h("circle", {
+							cx: size / 2, cy: size / 2, r, fill: "none", stroke: color, strokeWidth: 6,
+							strokeDasharray: c, strokeDashoffset: c * (1 - pct / 100), strokeLinecap: "round",
+							transform: `rotate(-90 ${size / 2} ${size / 2})`, style: { transition: "stroke-dashoffset 0.4s" },
+						}),
+					h("text", { x: size / 2, y: size / 2 + 5, textAnchor: "middle", fontSize: 14, fontWeight: 600, fill: pct === null ? "#bbb" : color },
+						pct === null ? "—" : `${Math.round(pct)}%`)),
+				h("span", { style: { fontSize: 10, opacity: 0.65 } }, caption));
+		}
+
+		/** 账号卡片：头部（标识符 + 用户名）+ 圆环（5h 池）+ 状态徽章堆栈。 */
+		function AccountCard({ account }) {
 			const credits = account.usage?.pools?.find((p) => p.poolType === "default");
-			return h("tr", null,
-				h("td", { style: labelCell }, h("strong", null, account.label),
-					account.enabled ? null : badge("已停用", "#9ca3af")),
-				h("td", { style: labelCell },
-					account.keyStatus === "ok"
-						? badge("key 正常", C.ok, C.okBg)
-						: badge(`key ${account.keyStatus}`, C.err, C.errBg), " ",
-					h("span", { style: { fontSize: 11, opacity: 0.7 } }, account.keySource)),
-				h("td", { style: labelCell }, account.credSource),
-				h("td", { style: labelCell },
-					account.busy ? badge("忙", C.warn, C.warnBg) : badge("闲", C.ok, C.okBg)),
-				h("td", { style: labelCell },
-					account.cooldownRemainingMs > 0
-						? badge(`${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg)
-						: "—"),
-				h("td", { style: labelCell },
-					credits
-						? `${credits.remaining.toLocaleString()} / ${credits.limit.toLocaleString()}（${fmtPct(credits.ratio5h)}）`
-						: `余量未拉取 ${fmtTime(account.lastRateLimitAt ? 0 : 0)}`.trim()),
-				h("td", { style: labelCell }, fmtTime(account.lastRateLimitAt)),
-				h("td", { style: labelCell },
-					h("button", { style: btn, disabled: busy, onClick: () => onRefreshUsage(account.label) }, "刷新余量"),
-					h("button", { style: btn, disabled: busy, onClick: () => onRefetchKey(account.label) }, "重抓 key"))
-			);
+			const usedPct = credits && typeof credits.ratio5h === "number" ? credits.ratio5h * 100 : null;
+			const card = { border: "1px solid #f0f0f0", borderRadius: 8, overflow: "hidden", background: "#fff" };
+			const cardHeader = { padding: "8px 12px", background: "#fafafa", borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 };
+			const cardBody = { padding: "10px 12px", display: "flex", gap: 14, alignItems: "center" };
+			const infoLine = { display: "flex", alignItems: "center", gap: 6, margin: "3px 0", fontSize: 12 };
+			const muted = { color: "#888" };
+			return h("div", { style: card },
+				h("div", { style: cardHeader },
+					h("span", null, h("strong", null, account.label), account.enabled ? null : " ", account.enabled ? null : badge("已停用", "#9ca3af")),
+					h("span", { style: { fontSize: 12, ...muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+						account.username || "无用户名")),
+				h("div", { style: cardBody },
+					h(RingGauge, { pct: usedPct, color: usedPct === null ? "#bbb" : colorForPct(usedPct), caption: "5h 池已用" }),
+					h("div", { style: { flex: 1, minWidth: 0 } },
+						h("div", { style: infoLine },
+							account.keyStatus === "ok" ? badge("key 正常", C.ok, C.okBg) : badge(`key ${account.keyStatus}`, C.err, C.errBg),
+							h("span", { style: { fontSize: 11, opacity: 0.7 } }, account.keySource)),
+						h("div", { style: infoLine },
+							account.busy ? badge("忙", C.warn, C.warnBg) : badge("闲", C.ok, C.okBg),
+							account.cooldownRemainingMs > 0 ? badge(`冷却 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg) : null),
+						h("div", { style: { ...infoLine, ...muted } },
+							credits
+								? `余量 ${credits.remaining.toLocaleString()} / ${credits.limit.toLocaleString()}`
+								: "余量未拉取"),
+						h("div", { style: { ...infoLine, ...muted } },
+							`最近 429：${fmtTime(account.lastRateLimitAt)}`))));
 		}
 
 		/** 账号管理区（照 sensenova-usage-dashboard 的 config-row 交互）：
@@ -182,26 +203,138 @@ window.__ModuleLoader__.load({
 				} finally { setBusy(false); }
 			};
 
-			return h("details", { style: { marginTop: 12 }, open, onToggle: (e) => setOpen(e.target.open) },
-				h("summary", { style: { fontSize: 12, cursor: "pointer", opacity: 0.85, userSelect: "none" } }, "账号管理（保存在凭据中心，不进配置文件）"),
-				h("div", { style: { padding: "8px 2px" } },
-					notice ? h("div", { style: { fontSize: 12, color: notice.includes("失败") || notice.includes("不能为空") ? C.err : C.ok, margin: "4px 0 8px" } }, notice) : null,
-					rows === null ? h("div", { style: { fontSize: 12, opacity: 0.6 } }, "加载中…") : null,
-					rows !== null ? rows.map((row, index) =>
-						h("div", { key: index, style: { display: "flex", gap: 6, alignItems: "center", marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid rgba(127,127,127,0.15)" } },
-							h("input", { style: { ...input, flex: "0 0 110px" }, placeholder: "凭据标识符（如 ACC3）", title: "账号在凭据中心的命名前缀，保存后凭据写入 SENSENOVA_<标识符>_USERNAME/_PASSWORD/_KEY refs（自动转大写）", value: row.label, onChange: (e) => setRow(index, { label: e.target.value }) }),
-							h("input", { style: { ...input, flex: 1 }, placeholder: "用户名", value: row.username, onChange: (e) => setRow(index, { username: e.target.value }) }),
-							h("input", { style: { ...input, flex: 1 }, type: "password", placeholder: row.hasPassword ? "已存凭据中心（留空不修改）" : "密码", value: row.password, onChange: (e) => setRow(index, { password: e.target.value }) }),
-							h("span", { style: { fontSize: 11 } },
-								row.hasKey ? badge("有 key", C.ok, C.okBg) : badge("无 key", C.warn, C.warnBg)),
-							h("button", { style: btnPrimary, disabled: busy, onClick: () => saveRow(index) }, "保存并登录"),
-							h("button", { style: { ...btn, color: C.err }, disabled: busy, onClick: () => removeRow(index) }, "删")))
-						: null,
-					rows !== null
-						? h("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
-							h("button", { style: btn, disabled: busy, onClick: () => setRows((prev) => [...(prev ?? []), emptyRow()]) }, "＋ 添加账号"),
-							h("span", { style: { fontSize: 11, opacity: 0.65 } }, "凭据标识符 = 账号在凭据中心的命名前缀：保存后用户名/密码写入 SENSENOVA_<标识符>_USERNAME / _PASSWORD refs 并立即登录抓取 key（key 落 _KEY）。config 配置的账号（来源 settings）不在此显示，仍在配置里维护。"))
-						: null));
+			return h(
+        "details",
+        {
+          style: { marginTop: 12 },
+          open,
+          onToggle: (e) => setOpen(e.target.open),
+        },
+        h(
+          "summary",
+          {
+            style: {
+              fontSize: 12,
+              cursor: "pointer",
+              opacity: 0.85,
+              userSelect: "none",
+            },
+          },
+          "账号管理（保存在凭据中心，不进配置文件）",
+        ),
+        h(
+          "div",
+          { style: { padding: "8px 2px" } },
+          notice
+            ? h(
+                "div",
+                {
+                  style: {
+                    fontSize: 12,
+                    color:
+                      notice.includes("失败") || notice.includes("不能为空")
+                        ? C.err
+                        : C.ok,
+                    margin: "4px 0 8px",
+                  },
+                },
+                notice,
+              )
+            : null,
+          rows === null
+            ? h("div", { style: { fontSize: 12, opacity: 0.6 } }, "加载中…")
+            : null,
+          rows !== null
+            ? rows.map((row, index) =>
+                h(
+                  "div",
+                  {
+                    key: index,
+                    style: {
+                      display: "flex",
+                      gap: 6,
+                      alignItems: "center",
+                      marginBottom: 8,
+                      paddingBottom: 8,
+                      borderBottom: "1px solid rgba(127,127,127,0.15)",
+                    },
+                  },
+                  h("input", {
+                    style: { ...input, flex: "0 0 110px" },
+                    placeholder: "凭据标识符（如 ACC3）",
+                    title:
+                      "账号在凭据中心的命名前缀，保存后凭据写入 SENSENOVA_<标识符>_USERNAME/_PASSWORD/_KEY refs（自动转大写）",
+                    value: row.label,
+                    onChange: (e) => setRow(index, { label: e.target.value }),
+                  }),
+                  h("input", {
+                    style: { ...input, flex: 1 },
+                    placeholder: "用户名",
+                    value: row.username,
+                    onChange: (e) =>
+                      setRow(index, { username: e.target.value }),
+                  }),
+                  h("input", {
+                    style: { ...input, flex: 1 },
+                    type: "password",
+                    placeholder: row.hasPassword
+                      ? "已存凭据中心（留空不修改）"
+                      : "密码",
+                    value: row.password,
+                    onChange: (e) =>
+                      setRow(index, { password: e.target.value }),
+                  }),
+                  h(
+                    "span",
+                    { style: { fontSize: 11 } },
+                    row.hasKey
+                      ? badge("有 key", C.ok, C.okBg)
+                      : badge("无 key", C.warn, C.warnBg),
+                  ),
+                  h(
+                    "button",
+                    {
+                      style: btnPrimary,
+                      disabled: busy,
+                      onClick: () => saveRow(index),
+                    },
+                    "保存并登录",
+                  ),
+                  h(
+                    "button",
+                    {
+                      style: { ...btn, color: C.err },
+                      disabled: busy,
+                      onClick: () => removeRow(index),
+                    },
+                    "删",
+                  ),
+                ),
+              )
+            : null,
+          rows !== null
+            ? h(
+                "div",
+                { style: { display: "flex", gap: 8, alignItems: "center" } },
+                h(
+                  "button",
+                  {
+                    style: btn,
+                    disabled: busy,
+                    onClick: () =>
+                      setRows((prev) => [...(prev ?? []), emptyRow()]),
+                  },
+                  "＋ 添加账号",
+                ),
+                h(
+                  "span",
+                  { style: { fontSize: 11, opacity: 0.65 } },
+                  "ACC1：标识符，用户名/密码写入 凭据中心SENSENOVA_<标识符>_USERNAME / _PASSWORD 并立即登录抓取 key，config 配置的账号（来源 settings）不在此显示，仍在配置里维护。",
+                ),
+              )
+            : null,
+        ),
+      );
 		}
 
 		function StatusCard({ view }) {
@@ -233,14 +366,36 @@ window.__ModuleLoader__.load({
 				setNotice(void 0);
 				Promise.resolve()
 					.then(action)
-					.then((value) => { setNotice(`${label} 完成`); load(); return value; })
+					.then((value) => { setNotice(`${label} 完成${value ? `：${value}` : ""}`); load(); return value; })
 					.catch((e) => setNotice(`${label} 失败：${e?.message ?? e}`))
 					.finally(() => setBusy(false));
 			};
-			const onRefreshUsage = (label) => run(`[${label}] 刷新余量`, () => post(USAGE_PATH, { label }));
-			const onRefetchKey = (label) => {
-				if (!window.confirm(`重抓 ${label} 的 key 会重新登录该账号（限频 10 分钟）。继续？`)) return;
-				run(`[${label}] 重抓 key`, () => post(REFETCH_PATH, { label }));
+			// 工具栏动作作用于全部启用账号（操作列已移除，入口统一收在顶部）
+			const enabledLabels = () => (status?.accounts ?? []).filter((a) => a.enabled).map((a) => a.label);
+			const onRefreshAllUsage = () => {
+				const labels = enabledLabels();
+				if (!labels.length) { setNotice("没有启用的账号"); return; }
+				run(`刷新余量（${labels.length} 个账号）`, async () => {
+					const results = [];
+					for (const label of labels) {
+						try { await post(USAGE_PATH, { label }); results.push(`${label} ✓`); }
+						catch (e) { results.push(`${label} ✗ ${e?.message ?? e}`); }
+					}
+					return results.join("，");
+				});
+			};
+			const onRefetchAllKeys = () => {
+				const labels = enabledLabels();
+				if (!labels.length) { setNotice("没有启用的账号"); return; }
+				if (!window.confirm(`重抓 ${labels.length} 个账号的 key 会逐个重新登录（限频 10 分钟/账号）。继续？`)) return;
+				run(`重抓 key（${labels.length} 个账号）`, async () => {
+					const results = [];
+					for (const label of labels) {
+						try { await post(REFETCH_PATH, { label }); results.push(`${label} ✓`); }
+						catch (e) { results.push(`${label} ✗ ${e?.message ?? e}`); }
+					}
+					return results.join("，");
+				});
 			};
 
 			if (error !== undefined) {
@@ -258,19 +413,16 @@ window.__ModuleLoader__.load({
 			}
 
 			return h("div", { style: { padding: "8px 0" } },
-				h("div", { style: { display: "flex", alignItems: "center", gap: 8, margin: "4px 0 10px" } },
+				h("div", { style: { display: "flex", alignItems: "center", gap: 8, margin: "4px 0 10px", flexWrap: "wrap" } },
 					h("strong", null, "SenseNova Token Plans · 账号池状态"),
-					h("button", { style: btn, disabled: busy, onClick: load }, "刷新"),
+					h("button", { style: btn, disabled: busy, onClick: load, title: "重新加载状态" }, "刷新"),
+					h("button", { style: btn, disabled: busy, onClick: onRefreshAllUsage, title: "拉取全部启用账号的积分池余量" }, "刷新余量"),
+					h("button", { style: btn, disabled: busy, onClick: onRefetchAllKeys, title: "逐个重新登录并重抓 key（限频 10 分钟/账号）" }, "重抓 key"),
 					notice ? h("span", { style: { fontSize: 12, opacity: 0.8 } }, notice) : null),
-				h("table", { style: { borderCollapse: "collapse", fontSize: 13, width: "100%" } },
-					h("thead", null, h("tr", null,
-						h("th", { style: th }, "账号"), h("th", { style: th }, "key"), h("th", { style: th }, "凭据"),
-						h("th", { style: th }, "状态"), h("th", { style: th }, "冷却"), h("th", { style: th }, "通用池余量（5h）"),
-						h("th", { style: th }, "最近 429"), h("th", { style: th }, "操作"))),
-					h("tbody", null, accounts.map((a) => h(AccountRow, {
-						key: a.label, account: { ...a, usage: status?.usage?.[a.label] },
-						busy, onRefreshUsage, onRefetchKey
-					})))),
+				h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 } },
+					accounts.map((a) => h(AccountCard, {
+						key: a.label, account: { ...a, usage: status?.usage?.[a.label] }
+					}))),
 				accounts.length === 0
 					? h("p", { style: { fontSize: 12, opacity: 0.7 } }, "还没有账号：展开下方「账号管理」填写用户名/密码（保存在凭据中心），或在 profile 的 cordis.patch.yml 中给 dsh-sensenova 行配置 accounts。")
 					: null,
