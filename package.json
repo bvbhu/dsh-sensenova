@@ -30,7 +30,7 @@
   "license": "MIT",
   "scripts": {
     "test": "node --test \"test/unit/*.test.js\"",
-    "smoke": "node test/smoke/patch.mjs"
+    "smoke": "node test/smoke/apply.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",

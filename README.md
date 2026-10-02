@@ -28,6 +28,12 @@ npm run smoke      # 补丁冒烟
 
 > 账号配置经 `config.accounts`（用户名/密码，key 可缺省按需抓取）或凭据中心 `SENSENOVA_ACC<N>_*` refs。完整设计文档与交接记录为本地资料，不入库（见 `.workbuddy/docs/`，仅本地保留）。
 
+## 兼容性
+
+- 宿主接口：`@deepseek-ai/dsh-llm` 0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.1 / 0.2.0-rc.2 实测同契约（运行时 `index.js` 在 rc.2 起完全一致，rc.1→rc.2 变更均为纯新增）；peer 范围 `^0.1.7-rc.1 || >=0.2.0-rc.1`，未来 0.x/后续版本按语义化接受
+- `@deepseek-ai/cordis`：peer `^4.0.4`（cordis 4.x 插件约定稳定）
+- 单测 50/50 跑在 0.2.0-rc.2 上；`offloadedImageText` 缺失时自动降级为通用占位文本（images.js）
+
 ## 入库范围说明
 
 - `sensenova-ratelimit-report/scripts/keys.json` 含明文 key，**永不入库**；
