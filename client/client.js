@@ -125,25 +125,42 @@ window.__ModuleLoader__.load({
 					h("span", null, `重置 ${fmtReset(pool.resetAt)} / ${pool.resetAt7d ? fmtReset(pool.resetAt7d) : "—"}`)));
 		}
 
-		/** 账号卡片：头部（标识符 + 用户名 + 状态徽章）+ 每积分池明细块 + 赠送余额。 */
+		/** 合并状态徽章：key 异常时忙/闲无意义——只有 key 正常才区分「使用中/空闲」。
+		 *  key 正常 + 在跑请求 = 使用中（主色）；key 正常 + 空闲 = 空闲（绿）；
+		 *  key 失效/缺失 = 红色错误态；冷却作为附加徽章叠加。 */
+		function statusBadge(account) {
+			if (account.keyStatus !== "ok") return badge(`key ${account.keyStatus}`, C.err, C.errBg);
+			return account.busy ? badge("使用中", C.primary, "#e6f4ff") : badge("空闲", C.ok, C.okBg);
+		}
+		/** 卡头健康圆点：绿=空闲可用、蓝=使用中、红=key 异常、灰=停用。 */
+		function healthDot(account) {
+			const color = !account.enabled ? "#d9d9d9"
+				: account.keyStatus !== "ok" ? C.err
+				: account.busy ? C.primary : C.ok;
+			return h("span", { style: { width: 8, height: 8, borderRadius: 4, background: color, display: "inline-block", flexShrink: 0 } });
+		}
+
+		/** 账号卡片：头部（健康点 + 标识符 + 用户名 + 状态徽章）+ 每积分池明细块 + 赠送余额。 */
 		function AccountCard({ account }) {
 			const usage = account.usage;
 			const pools = usage?.pools ?? [];
-			const card = { border: "1px solid #f0f0f0", borderRadius: 8, overflow: "hidden", background: "#fff" };
+			const card = { border: "1px solid #f0f0f0", borderRadius: 8, overflow: "hidden", background: "#fff", transition: "box-shadow 0.2s, border-color 0.2s" };
 			const cardHeader = { padding: "8px 12px", background: "#fafafa", borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 };
 			const cardBody = { padding: "8px 12px 10px" };
 			const muted = { color: "#888" };
-			return h("div", { style: card },
-				h("div", { style: cardHeader },
-					h("span", null, h("strong", null, account.label), account.enabled ? null : " ", account.enabled ? null : badge("已停用", "#9ca3af")),
+			return h("div", { style: card, className: "dsh-sensenova-card" },
+				h("div", { style: cardHeader, className: "dsh-sensenova-card-header" },
+					h("span", { style: { display: "flex", alignItems: "center", gap: 7, minWidth: 0 } },
+						healthDot(account),
+						h("strong", null, account.label),
+						account.enabled ? null : badge("已停用", "#9ca3af"),
+						statusBadge(account)),
 					h("span", { style: { fontSize: 12, ...muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
 						account.username || "无用户名")),
 				h("div", { style: cardBody },
 					h("div", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 2 } },
-						account.keyStatus === "ok" ? badge("key 正常", C.ok, C.okBg) : badge(`key ${account.keyStatus}`, C.err, C.errBg),
-						h("span", { style: { fontSize: 11, opacity: 0.7 } }, account.keySource),
-						account.busy ? badge("忙", C.warn, C.warnBg) : badge("闲", C.ok, C.okBg),
 						account.cooldownRemainingMs > 0 ? badge(`冷却 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg) : null,
+						h("span", { style: { fontSize: 11, opacity: 0.7 } }, `key 来源：${account.keySource}`),
 						h("span", { style: { fontSize: 11, ...muted, marginLeft: "auto" } }, `最近 429：${fmtTime(account.lastRateLimitAt)}`)),
 					pools.length === 0
 						? h("div", { style: { fontSize: 12, ...muted, padding: "6px 0" } }, "余量未拉取：点上方「刷新」拉取积分池用量")
@@ -463,6 +480,16 @@ window.__ModuleLoader__.load({
 		const inject = ["slots"];
 		function apply(ctx) {
 			try {
+				// 卡片 hover 效果（raw JSX 无样式表文件，注入一次全局样式）
+				if (!document.getElementById("dsh-sensenova-style")) {
+					const style = document.createElement("style");
+					style.id = "dsh-sensenova-style";
+					style.textContent = [
+						".dsh-sensenova-card:hover { border-color: #d9d9d9 !important; box-shadow: 0 2px 8px rgba(0,0,0,0.09); }",
+						".dsh-sensenova-card:hover .dsh-sensenova-card-header { background: #f0f5ff !important; }",
+					].join("\n");
+					document.head.appendChild(style);
+				}
 				document.body.dataset.dshSensenova = "apply-started";
 				const register = (slotName, key) => {
 					ctx.slots.inject(slotName, () => ctx.slots.register({
