@@ -150,11 +150,11 @@ window.__ModuleLoader__.load({
 			return h("div", { style: card, className: "dsh-sensenova-card" },
 				h("div", { style: cardHeader, className: "dsh-sensenova-card-header" },
 					h("span", { style: { display: "flex", alignItems: "center", gap: 7, minWidth: 0 } },
-						h("strong", null, account.label),
+						h("strong", null, account.username || account.label),
 						account.enabled ? null : badge("已停用", "#9ca3af"),
 						statusBadge(account)),
-					h("span", { style: { fontSize: 12, ...muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
-						account.username || "无用户名")),
+					h("span", { style: { fontSize: 11, ...muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+						account.username ? account.label : "无标识符")),
 				h("div", { style: cardBody },
 					h("div", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 2 } },
 						h("span", { style: { fontSize: 11, opacity: 0.7 } }, `key 来源：${account.keySource}`),
@@ -368,7 +368,7 @@ window.__ModuleLoader__.load({
                 h(
                   "span",
                   { style: { fontSize: 11, opacity: 0.65, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, title: "凭据标识符 = 凭据中心 ref 的命名前缀（如 ACC1 → SENSENOVA_ACC1_USERNAME / _PASSWORD / _KEY）" },
-                  "保存即写入凭据中心并登录抓 key；config 账号仍在配置里维护",
+                  "标识符 ACC<n> = 凭据中心 ref 前缀；保存即写入并登录抓 key；config 账号仍在配置里维护",
                 ),
               )
             : null,
