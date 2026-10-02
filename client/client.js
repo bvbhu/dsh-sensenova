@@ -370,30 +370,29 @@ window.__ModuleLoader__.load({
 					.catch((e) => setNotice(`${label} 失败：${e?.message ?? e}`))
 					.finally(() => setBusy(false));
 			};
-			// 工具栏动作作用于全部启用账号（操作列已移除，入口统一收在顶部）
+			// 刷新 = 一个按钮做完整链路：逐个启用账号拉余量；余量拉不动
+			// （JWT 过期/缺失）才自动重抓 key 再补拉一次，避免无谓的重复登录
 			const enabledLabels = () => (status?.accounts ?? []).filter((a) => a.enabled).map((a) => a.label);
-			const onRefreshAllUsage = () => {
-				const labels = enabledLabels();
-				if (!labels.length) { setNotice("没有启用的账号"); return; }
-				run(`刷新余量（${labels.length} 个账号）`, async () => {
-					const results = [];
-					for (const label of labels) {
-						try { await post(USAGE_PATH, { label }); results.push(`${label} ✓`); }
-						catch (e) { results.push(`${label} ✗ ${e?.message ?? e}`); }
+			const refreshAccount = async (label) => {
+				try {
+					await post(USAGE_PATH, { label });
+					return `${label} ✓`;
+				} catch (usageError) {
+					try {
+						await post(REFETCH_PATH, { label });
+						await post(USAGE_PATH, { label });
+						return `${label} ✓（已重抓 key）`;
+					} catch (e) {
+						return `${label} ✗ ${e?.message ?? usageError?.message ?? e}`;
 					}
-					return results.join("，");
-				});
+				}
 			};
-			const onRefetchAllKeys = () => {
+			const onRefreshAll = () => {
 				const labels = enabledLabels();
 				if (!labels.length) { setNotice("没有启用的账号"); return; }
-				if (!window.confirm(`重抓 ${labels.length} 个账号的 key 会逐个重新登录（限频 10 分钟/账号）。继续？`)) return;
-				run(`重抓 key（${labels.length} 个账号）`, async () => {
+				run(`刷新（${labels.length} 个账号）`, async () => {
 					const results = [];
-					for (const label of labels) {
-						try { await post(REFETCH_PATH, { label }); results.push(`${label} ✓`); }
-						catch (e) { results.push(`${label} ✗ ${e?.message ?? e}`); }
-					}
+					for (const label of labels) results.push(await refreshAccount(label));
 					return results.join("，");
 				});
 			};
@@ -415,9 +414,7 @@ window.__ModuleLoader__.load({
 			return h("div", { style: { padding: "8px 0" } },
 				h("div", { style: { display: "flex", alignItems: "center", gap: 8, margin: "4px 0 10px", flexWrap: "wrap" } },
 					h("strong", null, "SenseNova Token Plans · 账号池状态"),
-					h("button", { style: btn, disabled: busy, onClick: load, title: "重新加载状态" }, "刷新"),
-					h("button", { style: btn, disabled: busy, onClick: onRefreshAllUsage, title: "拉取全部启用账号的积分池余量" }, "刷新余量"),
-					h("button", { style: btn, disabled: busy, onClick: onRefetchAllKeys, title: "逐个重新登录并重抓 key（限频 10 分钟/账号）" }, "重抓 key"),
+					h("button", { style: btn, disabled: busy, onClick: onRefreshAll, title: "逐个启用账号拉取积分池余量；余量拉取失败时自动重抓 key（重新登录）后重试" }, "刷新"),
 					notice ? h("span", { style: { fontSize: 12, opacity: 0.8 } }, notice) : null),
 				h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 } },
 					accounts.map((a) => h(AccountCard, {
