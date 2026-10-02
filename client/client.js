@@ -358,7 +358,7 @@ window.__ModuleLoader__.load({
                 h(
                   "button",
                   {
-                    style: btn,
+                    style: { ...btn, whiteSpace: "nowrap", flexShrink: 0 },
                     disabled: busy,
                     onClick: () =>
                       setRows((prev) => [...(prev ?? []), emptyRow()]),
@@ -367,8 +367,8 @@ window.__ModuleLoader__.load({
                 ),
                 h(
                   "span",
-                  { style: { fontSize: 11, opacity: 0.65 } },
-                  "ACC1：标识符，用户名/密码写入 凭据中心SENSENOVA_<标识符>_USERNAME / _PASSWORD 并立即登录抓取 key，config 配置的账号（来源 settings）不在此显示，仍在配置里维护。",
+                  { style: { fontSize: 11, opacity: 0.65, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, title: "凭据标识符 = 凭据中心 ref 的命名前缀（如 ACC1 → SENSENOVA_ACC1_USERNAME / _PASSWORD / _KEY）" },
+                  "保存即写入凭据中心并登录抓 key；config 账号仍在配置里维护",
                 ),
               )
             : null,
