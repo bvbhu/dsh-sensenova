@@ -517,20 +517,51 @@ const imageIds = models.filter((m) => pick(m.id).image).map((m) => m.id);
 						h("div", { className: "dsm-trae-model-actions-buttons" },
 							h("button", { type: "button", className: "dsm-btn dsm-btn-primary", disabled: busy, onClick: save }, busy ? "保存中…" : "保存勾选"))));
 		}
-		/** 模型状态区：（账号,模型）粒度冷却的展示面——每个暴露给 dsh 的模型一行：
-		 *  空闲（没在忙且没进冷却）/ 请求中（在跑该模型）/ 冷却中（该 (账号,模型)
-		 *  在冷却；全部冷却时标红）。 */
-		function ModelStatusSection({ models }) {
+		/** 模型状态卡片：与账号余量卡片同款 chrome，和账号卡片排在同一网格。
+		 *  每个暴露给 dsh 的模型一个块：名称 + 空闲/请求中/冷却中 统计行 +
+		 *  逐账号分色条（一格 = 一个账号：绿=空闲 蓝=请求中 黄=冷却中）。 */
+		function ModelStatusCard({ models }) {
 			if (!models || models.length === 0) return null;
-			const row = { display: "flex", alignItems: "center", gap: 10, fontSize: 12, padding: "3px 0", minWidth: 0 };
-			const stat = (text, color) => h("span", { style: { fontSize: 11.5, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", ...(color ? { color } : null) } }, text);
-			return h("div", { style: { border: "1px solid #f0f0f0", borderRadius: 8, background: "#fff", padding: "8px 12px", marginBottom: 10 } },
-				h("div", { style: { fontSize: 12, fontWeight: 600, opacity: 0.85, marginBottom: 4 } }, "模型状态（按模型冷却）"),
-				models.map((m) => h("div", { key: m.id, style: row },
-					h("span", { style: { fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, m.name || m.id),
-					stat(`空闲 ${m.idle}`),
-					stat(`请求中 ${m.requesting}`, m.requesting > 0 ? C.primary : null),
-					stat(`冷却中 ${m.cooling}`, m.cooling === 0 ? null : m.cooling === m.total ? C.err : C.warn))));
+			const card = { border: "1px solid #f0f0f0", borderRadius: 8, overflow: "hidden", background: "#fff" };
+			const cardHeader = { padding: "8px 12px", background: "#fafafa", borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 };
+			const cardBody = { padding: "8px 12px 10px" };
+			return h("div", { style: card, className: "dsh-sensenova-card" },
+				h("div", { style: cardHeader, className: "dsh-sensenova-card-header" },
+					h("strong", null, "模型状态")),
+				h("div", { style: cardBody },
+					models.map((m) => h(ModelBlock, { key: m.id, model: m }))));
+		}
+
+		/** 单个模型的块（PoolBlock 同款视觉）：统计行 + 逐账号分色条。 */
+		function ModelBlock({ model: m }) {
+			// 三态配色：绿=空闲（dashboard 成功色）、蓝=请求（Ant processing 蓝，
+			// 比主色 #0958d9 亮一档，小格上更醒目）、黄=冷却（dashboard 警告色）
+			const COLOR = { idle: "#52c41a", requesting: "#1890ff", cooling: "#faad14" };
+			const headRow = { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 5 };
+			const stat = (label, value, color) => h("span", { style: { fontSize: 11.5, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", ...(color ? { color } : null) } }, `${label} ${value}`);
+			const cells = [];
+			const push = (n, prefix, color, title) => {
+				for (let i = 0; i < n; i += 1) {
+					cells.push(h("div", {
+						key: `${prefix}${i}`,
+						style: { flex: 1, minWidth: 3, height: 6, borderRadius: 3, background: color },
+						title,
+					}));
+				}
+			};
+			push(m.idle, "i", COLOR.idle, "空闲");
+			push(m.requesting, "r", COLOR.requesting, "请求中");
+			push(m.cooling, "c", COLOR.cooling, "冷却中");
+			return h("div", { style: { border: "1px solid #f0f0f0", borderRadius: 6, padding: "8px 10px", marginTop: 6 } },
+				h("div", { style: headRow },
+					h("strong", { style: { fontSize: 12 } }, m.name || m.id),
+					h("span", { style: { display: "flex", gap: 8 } },
+						stat("空闲", m.idle, m.idle === 0 && m.total > 0 ? C.err : null),
+						stat("请求", m.requesting, m.requesting > 0 ? COLOR.requesting : null),
+						stat("冷却", m.cooling, m.cooling === 0 ? null : m.cooling === m.total ? C.err : COLOR.cooling))),
+				m.total === 0
+					? h("div", { style: { fontSize: 11, color: "#888" } }, "无可用账号")
+					: h("div", { style: { display: "flex", gap: 3 } }, cells));
 		}
 
 		function StatusCard({ view, settingsScope }) {
@@ -627,11 +658,11 @@ const imageIds = models.filter((m) => pick(m.id).image).map((m) => m.id);
 					h("button", { style: btn, disabled: busy, onClick: onRefreshAll, title: "逐个启用账号拉取积分池余量；余量拉取失败时自动重抓 key（重新登录）后重试" }, "刷新"),
 					lastRefreshAt ? h("span", { style: { fontSize: 11, opacity: 0.6 } }, `上次刷新 ${fmtClock(lastRefreshAt)}`) : null,
 					notice ? h("span", { style: { fontSize: 12, opacity: 0.8 } }, notice) : null),
-					h(ModelStatusSection, { models: status?.models ?? [] }),
 					h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 } },
-					accounts.map((a) => h(AccountCard, {
-						key: a.label, account: { ...a, usage: status?.usage?.[a.label] }
-					}))),
+						h(ModelStatusCard, { models: status?.models ?? [] }),
+						accounts.map((a) => h(AccountCard, {
+							key: a.label, account: { ...a, usage: status?.usage?.[a.label] }
+						}))),
 				accounts.length === 0
 					? h("p", { style: { fontSize: 12, opacity: 0.7 } }, "还没有账号：展开下方「账号管理」填写用户名/密码（保存在凭据中心）。")
 					: null,
