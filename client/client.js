@@ -83,6 +83,20 @@ window.__ModuleLoader__.load({
 			}
 		}, text);
 
+		// 页面动画（spinner / 骨架屏微光）：raw jsx-runtime 没有构建链，
+		// keyframes 只能注入 <style>；幂等，重复 load 模块不会重复插。
+		if (!document.getElementById("dsh-sensenova-style")) {
+			const styleTag = document.createElement("style");
+			styleTag.id = "dsh-sensenova-style";
+			styleTag.textContent = [
+				"@keyframes dsh-sensenova-spin { to { transform: rotate(360deg); } }",
+				"@keyframes dsh-sensenova-shimmer { 0% { background-position: -240px 0; } 100% { background-position: 240px 0; } }",
+				".dsh-sensenova-spinner { width: 14px; height: 14px; border: 2px solid rgba(9,88,217,0.2); border-top-color: #0958d9; border-radius: 50%; animation: dsh-sensenova-spin 0.8s linear infinite; display: inline-block; vertical-align: -2px; }",
+				".dsh-sensenova-skeleton { height: 6px; border-radius: 3px; background: linear-gradient(90deg, #ececec 25%, #f8f8f8 37%, #ececec 63%); background-size: 480px 100%; animation: dsh-sensenova-shimmer 1.2s ease-in-out infinite; }",
+			].join("\n");
+			document.head.append(styleTag);
+		}
+
 		// 配色照 sensenova-usage-dashboard：用量 <60% 绿 / <85% 黄 / 其余红
 		const colorForPct = (pct) => (pct < 60 ? C.ok : pct < 85 ? "#faad14" : C.err);
 		const fmtNum = (n) => Number(n ?? 0).toLocaleString("zh-CN", { maximumFractionDigits: 1 });
@@ -544,7 +558,7 @@ const imageIds = models.filter((m) => pick(m.id).image).map((m) => m.id);
 				for (let i = 0; i < n; i += 1) {
 					cells.push(h("div", {
 						key: `${prefix}${i}`,
-						style: { flex: 1, minWidth: 3, height: 6, borderRadius: 3, background: color },
+						style: { flex: 1, minWidth: 3, height: 6, borderRadius: 3, background: color, transition: "background 0.3s" },
 						title,
 					}));
 				}
@@ -642,6 +656,20 @@ const imageIds = models.filter((m) => pick(m.id).image).map((m) => m.id);
 				return h("div", { style: { padding: 12, color: "#dc2626" } }, "状态加载失败：", error, " ",
 					h("button", { style: btn, onClick: load }, "重试"));
 			}
+			// 首次加载（/status 可能内联等待登录抓余量）：骨架屏 + spinner
+			if (status === null) {
+				const skeletonCard = (widths) => h("div", { style: { border: "1px solid #f0f0f0", borderRadius: 8, background: "#fff", padding: "10px 12px" } },
+					h("div", { className: "dsh-sensenova-skeleton", style: { width: "38%", height: 10, marginBottom: 12 } }),
+					widths.map((w, i) => h("div", { key: i, className: "dsh-sensenova-skeleton", style: { width: `${w}%`, marginBottom: i < widths.length - 1 ? 8 : 0 } })));
+				return h("div", { style: { padding: "8px 0" } },
+					h("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, opacity: 0.75, margin: "4px 0 10px" } },
+						h("span", { className: "dsh-sensenova-spinner" }),
+						"正在加载账号池状态…（需要逐一登录抓取信息）"),
+					h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 } },
+						skeletonCard([100, 82, 64]),
+						skeletonCard([92, 100, 58]),
+						skeletonCard([100, 74])));
+			}
 			const accounts = status?.accounts ?? [];
 			const logTail = status?.logTail ?? "";
 
@@ -655,7 +683,9 @@ const imageIds = models.filter((m) => pick(m.id).image).map((m) => m.id);
 			return h("div", { style: { padding: "8px 0" } },
 				h("div", { style: { display: "flex", alignItems: "center", gap: 8, margin: "4px 0 10px", flexWrap: "wrap" } },
 					h("strong", null, "SenseNova Token Plans · 账号池状态"),
-					h("button", { style: btn, disabled: busy, onClick: onRefreshAll, title: "逐个启用账号拉取积分池余量；余量拉取失败时自动重抓 key（重新登录）后重试" }, "刷新"),
+					h("button", { style: btn, disabled: busy, onClick: onRefreshAll, title: "逐个启用账号拉取积分池余量；余量拉取失败时自动重抓 key（重新登录）后重试" },
+						busy ? h("span", { className: "dsh-sensenova-spinner", style: { width: 11, height: 11, verticalAlign: "-1px", marginRight: 5 } }) : null,
+						busy ? "刷新中…" : "刷新"),
 					lastRefreshAt ? h("span", { style: { fontSize: 11, opacity: 0.6 } }, `上次刷新 ${fmtClock(lastRefreshAt)}`) : null,
 					notice ? h("span", { style: { fontSize: 12, opacity: 0.8 } }, notice) : null),
 					h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 } },
