@@ -221,9 +221,9 @@ test('key 换新：重置健康标记（重抓后的覆写）', async () => {
 })
 
 test('failover-then-fail：全池 TPM 耗尽后上抛 RATE_LIMIT', async () => {
-  // 带消耗的 429 → TPM 归因（不固定）：两账号都冷却 ~60s → 池耗尽 → 快速失败
+  // 大额消耗（≥16384 阈值）的 429 → TPM 归因（不固定）：两账号都冷却 ~60s → 池耗尽 → 快速失败
   const impl = async function* () {
-    yield { type: 'usage', usage: { inputTokens: 1000, outputTokens: 10 } }
+    yield { type: 'usage', usage: { inputTokens: 20_000, outputTokens: 10 } }
     throw rateLimitError()
   }
   const s = makeScheduler(impl, [
@@ -332,6 +332,54 @@ test('429 归因 tpm：窗口内有成功消耗 → 冷却至滚动窗口释放�
   // 其他模型不受该冷却影响
   const cands = await s.candidates(Date.now(), undefined, 'kimi-k3')
   assert.equal(cands.filter((a) => a.label === 'ACC1').length, 1)
+})
+
+test('空窗判定阈值：窗口消耗 <16384 视为服务繁忙（固定重试），≥16384 判 TPM 冷却', async () => {
+  const impl = (tokens) => async function* () {
+    yield { type: 'usage', usage: { inputTokens: tokens, outputTokens: 0, cacheReadTokens: 0 } }
+    throw rateLimitError()
+  }
+  // 16383 < 阈值：空窗 → 服务繁忙 → 固定（账号, 模型）重试
+  const controller = new AbortController()
+  const busy = makeScheduler(impl(16_383), [{ label: 'ACC1', key: 'sk-1', enabled: true }])
+  setTimeout(() => controller.abort(), 60)
+  await assert.rejects(
+    () => collect(busy.stream({ model: 'glm-5.2' }, { signal: controller.signal })),
+    (error) => error.failure?.code === 'ABORTED',
+  )
+  assert.equal(busy.lastRateLimit.get('ACC1')?.kind, 'busy')
+  assert.equal(busy.busyHold.get('glm-5.2'), 'ACC1')
+  // 16384 ≥ 阈值：TPM 归因 → 冷却不固定
+  const tpm = makeScheduler(impl(16_384), [{ label: 'ACC1', key: 'sk-1', enabled: true }])
+  await assert.rejects(
+    () => collect(tpm.stream({ model: 'glm-5.2' }, {})),
+    (error) => error.failure?.code === 'RATE_LIMIT',
+  )
+  assert.equal(tpm.lastRateLimit.get('ACC1')?.kind, 'tpm')
+  assert.equal(tpm.busyHold.get('glm-5.2'), undefined, 'TPM 归因不固定')
+})
+
+test('固定回合的重复 429 只发一次 rate-limit 事件（重复请求不刷日志）', async () => {
+  let calls = 0
+  const impl = async function* () {
+    calls += 1
+    if (calls <= 3) throw rateLimitError()
+    yield* fakeStream()()
+  }
+  const events = []
+  const s = new Scheduler({
+    listAccounts: () => [{ label: 'ACC1', key: 'sk-1', enabled: true }],
+    options: OPTS,
+    streamImpl: impl,
+    onEvent: (_label, fact) => events.push(fact),
+  })
+  const chunks = await collect(s.stream({ model: 'glm-5.2' }, {}))
+  assert.ok(calls >= 4)
+  assert.equal(chunks.at(-1).type, 'finish')
+  const busyEvents = events.filter((e) => e.type === 'rate-limit' && e.kind === 'busy')
+  assert.equal(busyEvents.length, 1, `固定回合只发一次事件（实际 ${busyEvents.length}）`)
+  assert.equal(busyEvents[0].cooldownMs, 20, '事件携带冷却时长（= retryIntervalMs）')
+  assert.ok(s.lastRateLimit.get('ACC1'), 'lastRateLimit 照常刷新（状态页不受影响）')
 })
 
 test('TPM 记账：缓存命中 tokens 不计（实测命中不计 TPM）', async () => {

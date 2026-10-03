@@ -4,6 +4,10 @@ node_modules/
 # 工作区数据
 .workbuddy/
 
+# 本地文档区（设计/交接/devlog，仅本地保留，不入库）
+# 仓库跟踪的文档只有根 README.md 与 sensenova-ratelimit-report/README.md
+docs/
+
 # 运行产物
 *.log
 # 插件运行日志目录（本地运行残留，不入库）
