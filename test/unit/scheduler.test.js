@@ -133,6 +133,26 @@ test('已固定的（账号, 模型）再次 429 且窗口有消耗：保持固�
   assert.equal(s.lastRateLimit.get('ACC1')?.kind, 'busy', '第二次 429 仍是 busy 归因')
 })
 
+test('snapshot：在途请求的账号携带 inflightModel（模型状态区"请求中"的数据源）', async () => {
+  let release
+  const gate = new Promise((r) => { release = r })
+  const impl = async function* () {
+    await gate
+    yield* fakeStream()()
+  }
+  const s = makeScheduler(impl, [{ label: 'ACC1', key: 'sk-1', enabled: true }])
+  const done = collect(s.stream({ model: 'glm-5.2' }, {}))
+  await new Promise((r) => setTimeout(r, 60))
+  const snap = await s.snapshot()
+  assert.equal(snap[0].busy, true)
+  assert.equal(snap[0].inflightModel, 'glm-5.2')
+  release()
+  await done
+  const after = await s.snapshot()
+  assert.equal(after[0].busy, false)
+  assert.equal(after[0].inflightModel, undefined, '请求结束清空在途模型')
+})
+
 test('固定重试在 failover-then-fail 下也不快速失败（直到成功或手动中断）', async () => {
   let calls = 0
   const impl = async function* () {

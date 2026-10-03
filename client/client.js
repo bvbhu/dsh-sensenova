@@ -37,11 +37,6 @@ window.__ModuleLoader__.load({
 		// 成功 #52c41a / 警告 #faad14 / 错误 #f5222d + 对应浅底徽章。
 		const C = { primary: "#0958d9", ok: "#52c41a", okBg: "#e6f7e6", warn: "#ad6800", warnBg: "#fffbe6", err: "#f5222d", errBg: "#fff1f0" };
 		const fmtClock = (ms) => { if (!ms) return "—"; const d = new Date(ms); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`; };
-		const fmtTime = (ms) => {
-			if (!ms) return "—";
-			const d = new Date(ms);
-			return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-		};
 		const post = async (path, body) => {
 			const response = await fetch(path, {
 				method: "POST",
@@ -142,21 +137,8 @@ window.__ModuleLoader__.load({
 					: null);
 		}
 
-		/** 合并状态徽章：冷却属于空闲的子态——key 异常时忙/闲/冷却都无意义。
-		 *  key 正常 + 在跑请求 = 使用中（主色）；冷却按 429 归因细分：
-		 *  空窗 429 = 服务繁忙（黄）；TPM 429 = TPM 冷却 Xs（黄）；
-		 *  key 正常 + 空闲 = 空闲（绿）；key 失效/缺失 = 红色错误态。 */
-		function statusBadge(account) {
-			if (account.keyStatus !== "ok") return badge(`key ${account.keyStatus}`, C.err, C.errBg);
-			if (account.cooldownRemainingMs > 0) {
-				if (account.lastRateLimitKind === "busy") return badge("服务繁忙", C.warn, C.warnBg);
-				if (account.lastRateLimitKind === "tpm") return badge(`TPM 冷却 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg);
-				return badge(`冷却 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg);
-			}
-			return account.busy ? badge("使用中", C.primary, "#e6f4ff") : badge("空闲", C.ok, C.okBg);
-		}
-
-		/** 账号卡片：头部（标识符 + 用户名 + 状态徽章）+ 每积分池明细块（赠送余额并入通用池）。 */
+		/** 账号卡片：头部（标识符 + 用户名）+ 每积分池明细块（赠送余额并入通用池）。
+		 *  分模型冷却后账号级忙/闲/冷却徽标已移除——实时状态看上方「模型状态」区。 */
 		function AccountCard({ account }) {
 			const usage = account.usage;
 			const pools = usage?.pools ?? [];
@@ -168,14 +150,10 @@ window.__ModuleLoader__.load({
 				h("div", { style: cardHeader, className: "dsh-sensenova-card-header" },
 					h("span", { style: { display: "flex", alignItems: "center", gap: 7, minWidth: 0 } },
 						h("strong", null, account.username || account.label),
-						account.enabled ? null : badge("已停用", "#9ca3af"),
-						statusBadge(account)),
+						account.enabled ? null : badge("已停用", "#9ca3af")),
 					h("span", { style: { fontSize: 11, ...muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
 						account.username ? account.label : "无标识符")),
 				h("div", { style: cardBody },
-					h("div", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 2 } },
-						h("span", { style: { fontSize: 11, opacity: 0.7 } }, `key 来源：${account.keySource}`),
-						h("span", { style: { fontSize: 11, ...muted, marginLeft: "auto" } }, `最近 429：${fmtTime(account.lastRateLimitAt)}`)),
 					pools.length === 0
 						? h("div", { style: { fontSize: 12, ...muted, padding: "6px 0" } }, "余量未拉取：点上方「刷新」拉取积分池用量")
 						: pools.map((pool, i) => h(PoolBlock, {
@@ -539,6 +517,22 @@ const imageIds = models.filter((m) => pick(m.id).image).map((m) => m.id);
 						h("div", { className: "dsm-trae-model-actions-buttons" },
 							h("button", { type: "button", className: "dsm-btn dsm-btn-primary", disabled: busy, onClick: save }, busy ? "保存中…" : "保存勾选"))));
 		}
+		/** 模型状态区：（账号,模型）粒度冷却的展示面——每个暴露给 dsh 的模型一行：
+		 *  空闲（没在忙且没进冷却）/ 请求中（在跑该模型）/ 冷却中（该 (账号,模型)
+		 *  在冷却；全部冷却时标红）。 */
+		function ModelStatusSection({ models }) {
+			if (!models || models.length === 0) return null;
+			const row = { display: "flex", alignItems: "center", gap: 10, fontSize: 12, padding: "3px 0", minWidth: 0 };
+			const stat = (text, color) => h("span", { style: { fontSize: 11.5, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", ...(color ? { color } : null) } }, text);
+			return h("div", { style: { border: "1px solid #f0f0f0", borderRadius: 8, background: "#fff", padding: "8px 12px", marginBottom: 10 } },
+				h("div", { style: { fontSize: 12, fontWeight: 600, opacity: 0.85, marginBottom: 4 } }, "模型状态（按模型冷却）"),
+				models.map((m) => h("div", { key: m.id, style: row },
+					h("span", { style: { fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, m.name || m.id),
+					stat(`空闲 ${m.idle}`),
+					stat(`请求中 ${m.requesting}`, m.requesting > 0 ? C.primary : null),
+					stat(`冷却中 ${m.cooling}`, m.cooling === 0 ? null : m.cooling === m.total ? C.err : C.warn))));
+		}
+
 		function StatusCard({ view, settingsScope }) {
 			const [status, setStatus] = react.useState(null);
 			const [error, setError] = react.useState(void 0);
@@ -633,7 +627,8 @@ const imageIds = models.filter((m) => pick(m.id).image).map((m) => m.id);
 					h("button", { style: btn, disabled: busy, onClick: onRefreshAll, title: "逐个启用账号拉取积分池余量；余量拉取失败时自动重抓 key（重新登录）后重试" }, "刷新"),
 					lastRefreshAt ? h("span", { style: { fontSize: 11, opacity: 0.6 } }, `上次刷新 ${fmtClock(lastRefreshAt)}`) : null,
 					notice ? h("span", { style: { fontSize: 12, opacity: 0.8 } }, notice) : null),
-				h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 } },
+					h(ModelStatusSection, { models: status?.models ?? [] }),
+					h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 } },
 					accounts.map((a) => h(AccountCard, {
 						key: a.label, account: { ...a, usage: status?.usage?.[a.label] }
 					}))),
