@@ -57,9 +57,11 @@ test('成功路径：block-start → deltas → block-end → usage → finish',
   assert.deepEqual(finish.reason, { kind: 'stop' })
 })
 
-test('429：账号冷却并换下一账号成功', async () => {
+test('空窗 429：钉住账号重试直到成功（不轮换），成功后解除', async () => {
+  const calledKeys = []
   let calls = 0
-  const impl = async function* () {
+  const impl = async function* ({ key }) {
+    calledKeys.push(key)
     calls += 1
     if (calls === 1) throw rateLimitError()
     yield* fakeStream()()
@@ -70,9 +72,68 @@ test('429：账号冷却并换下一账号成功', async () => {
   ])
   const chunks = await collect(s.stream({}, {}))
   assert.equal(calls, 2)
+  // 全部请求都落在 ACC1（钉住探测），ACC2 从未被调用
+  assert.deepEqual(calledKeys, ['sk-1', 'sk-1'])
   assert.equal(chunks.at(-1).type, 'finish')
   assert.ok(s.accounts.get('ACC1').cooldownUntil > 0, 'ACC1 进入冷却')
   assert.ok(s.lastRateLimit.get('ACC1')?.at > 0)
+  assert.equal(s.busyPinLabel, null, '成功后解除钉住')
+})
+
+test('钉住探测在 failover-then-fail 下也不快速失败（直到成功或手动中断）', async () => {
+  let calls = 0
+  const impl = async function* () {
+    calls += 1
+    if (calls <= 2) throw rateLimitError()
+    yield* fakeStream()()
+  }
+  const s = makeScheduler(impl, [{ label: 'ACC1', key: 'sk-1', enabled: true }])
+  const chunks = await collect(s.stream({}, {}))
+  assert.ok(calls >= 3)
+  assert.equal(chunks.at(-1).type, 'finish')
+})
+
+test('钉住期间手动中断：以 ABORTED 结束，钉住保持', async () => {
+  const controller = new AbortController()
+  const calledKeys = []
+  const impl = async function* ({ key }) {
+    calledKeys.push(key)
+    throw rateLimitError()
+  }
+  const s = makeScheduler(impl, [
+    { label: 'ACC1', key: 'sk-1', enabled: true },
+    { label: 'ACC2', key: 'sk-2', enabled: true },
+  ])
+  setTimeout(() => controller.abort(), 80)
+  await assert.rejects(
+    () => collect(s.stream({}, { signal: controller.signal })),
+    (error) => error.failure?.code === 'ABORTED',
+  )
+  assert.equal(s.busyPinLabel, 'ACC1')
+  assert.deepEqual([...new Set(calledKeys)], ['sk-1'], '只探测钉住账号')
+})
+
+test('钉住账号 key 失效：解除钉住并换号', async () => {
+  let calls = 0
+  const impl = async function* () {
+    calls += 1
+    if (calls === 1) throw rateLimitError() // 空窗 → 钉住 ACC1
+    if (calls === 2) { // 钉住的 ACC1 key 失效
+      const error = new Error('unauthorized')
+      error.failure = { code: 'INVALID_CREDENTIAL' }
+      throw error
+    }
+    yield* fakeStream()()
+  }
+  const s = makeScheduler(impl, [
+    { label: 'ACC1', key: 'sk-1', enabled: true },
+    { label: 'ACC2', key: 'sk-2', enabled: true },
+  ])
+  const chunks = await collect(s.stream({}, {}))
+  assert.equal(calls, 3)
+  assert.equal(s.accounts.get('ACC1').keyStatus, 'dead')
+  assert.equal(s.busyPinLabel, null, 'key 失效解除钉住')
+  assert.equal(chunks.at(-1).type, 'finish')
 })
 
 test('key 失效（401）：标记 dead 并换号', async () => {
@@ -106,8 +167,12 @@ test('key 换新：重置健康标记（重抓后的覆写）', async () => {
   assert.equal(acc.key, 'sk-new')
 })
 
-test('failover-then-fail：全池 429 耗尽后上抛 RATE_LIMIT', async () => {
-  const impl = async function* () { throw rateLimitError() }
+test('failover-then-fail：全池 TPM 耗尽后上抛 RATE_LIMIT', async () => {
+  // 带消耗的 429 → TPM 归因（不钉住）：两账号都冷却 ~60s → 池耗尽 → 快速失败
+  const impl = async function* () {
+    yield { type: 'usage', usage: { inputTokens: 1000, outputTokens: 10 } }
+    throw rateLimitError()
+  }
   const s = makeScheduler(impl, [
     { label: 'ACC1', key: 'sk-1', enabled: true },
     { label: 'ACC2', key: 'sk-2', enabled: true },
@@ -116,6 +181,7 @@ test('failover-then-fail：全池 429 耗尽后上抛 RATE_LIMIT', async () => {
     () => collect(s.stream({}, {})),
     (error) => error.failure?.code === 'RATE_LIMIT',
   )
+  assert.equal(s.busyPinLabel, null, 'TPM 归因不钉住')
 })
 
 test('wait-until-available：全池冷却时等待重扫直到成功', async () => {
@@ -136,12 +202,17 @@ test('wait-until-available：全池冷却时等待重扫直到成功', async () 
 })
 
 test('429 归因 busy：空窗（无成功消耗）→ 短冷却 = retryIntervalMs', async () => {
+  const controller = new AbortController()
   const s = makeScheduler(async function* () { throw rateLimitError() }, [
     { label: 'ACC1', key: 'sk-1', enabled: true },
     { label: 'ACC2', key: 'sk-2', enabled: true },
   ])
   const t0 = Date.now()
-  await assert.rejects(() => collect(s.stream({}, {})), (error) => error.failure?.code === 'RATE_LIMIT')
+  setTimeout(() => controller.abort(), 80)
+  await assert.rejects(
+    () => collect(s.stream({}, { signal: controller.signal })),
+    (error) => error.failure?.code === 'ABORTED',
+  )
   const acc = s.accounts.get('ACC1')
   const limit = s.lastRateLimit.get('ACC1')
   assert.equal(limit.kind, 'busy')
