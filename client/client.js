@@ -186,7 +186,7 @@ window.__ModuleLoader__.load({
 
 		/** 账号管理区（照 sensenova-usage-dashboard 的 config-row 交互）：
 		 * 每行 = 凭据标识符 + 用户名 + 密码 +「保存并登录」+「删」；保存即落凭据中心。
-		 * 凭据标识符 = 账号在凭据中心的命名前缀（如 ACC3 → SENSENOVA_ACC3_* refs）。 */
+		 * 凭据标识符 = 账号在凭据中心的命名前缀（如 ACC3 → key 写 SENSENOVA_ACC3_KEY，用户名/密码内嵌 SENSENOVA_ACCOUNTS）。 */
 		function AccountManager({ onChanged, existingLabels = [] }) {
 			const [rows, setRows] = react.useState(null);
 			const [notice, setNotice] = react.useState(void 0);
@@ -246,7 +246,7 @@ window.__ModuleLoader__.load({
 
 			const removeRow = async (index) => {
 				const row = rows[index];
-				if (!window.confirm(`从账号清单移除 ${row.label}？（凭据中心 refs 保留）`)) return;
+				if (!window.confirm(`从账号清单移除 ${row.label}？（其 KEY ref 保留，可手动清理）`)) return;
 				setBusy(true); setNotice(void 0);
 				try {
 					await request("DELETE", ACCOUNTS_PATH, { label: row.label });
@@ -317,7 +317,7 @@ window.__ModuleLoader__.load({
                     style: { ...input, flex: "0 0 110px" },
                     placeholder: "凭据标识符（如 ACC3）",
                     title:
-                      "账号在凭据中心的命名前缀，保存后凭据写入 SENSENOVA_<标识符>_USERNAME/_PASSWORD/_KEY refs（自动转大写）",
+                      "账号在凭据中心的命名前缀，保存后用户名/密码内嵌 SENSENOVA_ACCOUNTS、key 写入 SENSENOVA_<标识符>_KEY（自动转大写）",
                     value: row.label,
                     onChange: (e) => setRow(index, { label: e.target.value }),
                   }),
@@ -382,7 +382,7 @@ window.__ModuleLoader__.load({
                 ),
                 h(
                   "span",
-                  { style: { fontSize: 11, opacity: 0.65, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, title: "凭据标识符 = 凭据中心 ref 的命名前缀（如 ACC1 → SENSENOVA_ACC1_USERNAME / _PASSWORD / _KEY）" },
+                  { style: { fontSize: 11, opacity: 0.65, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, title: "凭据标识符 = key ref 的命名前缀（如 ACC1 → SENSENOVA_ACC1_KEY；用户名/密码内嵌 SENSENOVA_ACCOUNTS）" },
                   "标识符 ACC<n> = 凭据中心 ref 前缀；保存即写入并登录抓 key",
                 ),
               )

@@ -2,13 +2,18 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync } from 'node:crypto'
 
-import { ensureAccountKey, refetchAfterKeyDead, _resetRefetchStateForTests } from '../../lib/credentials.js'
+import { ensureAccountKey, refetchAfterKeyDead, resolveUsableJwt, _resetRefetchStateForTests } from '../../lib/credentials.js'
 
 // 一次性 RSA JWK（login 内部拉 JWKS）
 const { publicKeyJwk } = (() => {
   const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
   return { publicKeyJwk: publicKey.export({ format: 'jwk' }) }
 })()
+
+/** 可控 exp 的 JWT 形状（resolveUsableJwt 只解析 payload.exp）。 */
+const makeJwt = (expSeconds) => `h.${Buffer.from(JSON.stringify({ exp: expSeconds })).toString('base64url')}.s`
+const FUTURE_JWT = makeJwt(Math.floor(Date.now() / 1000) + 3600)
+const PAST_JWT = makeJwt(Math.floor(Date.now() / 1000) - 3600)
 
 /** 假 credentials 服务（记录 set 调用）。 */
 function fakeCredentials(store) {
@@ -49,7 +54,7 @@ function scriptedFetch(scripts) {
 
 const HAPPY_SCRIPTS = [
   { match: '/iam/idp/v1/apiKeys', json: { api_keys: [{ id: '1', status: 'enabled', api_key: 'sk-fresh', type: 'nova.tokenplan.v1' }] } },
-  { match: 'oauth2/token', json: { access_token: 'JWT9' } },
+  { match: 'oauth2/token', json: { access_token: FUTURE_JWT } },
   { match: '/callback', location: 'https://platform.sensenova.cn/?code=C1' },
   { match: 'nova/login', json: { redirect: 'https://platform.sensenova.cn/callback' } },
   { match: 'login_challenge=LC', body: '<html>login</html>' },
@@ -66,7 +71,7 @@ test('ensureAccountKey：已有 key 直接返回，不登录', async () => {
   assert.equal(logins, 0)
 })
 
-test('ensureAccountKey：无 key → 登录抓取并写回凭据中心', async () => {
+test('ensureAccountKey：无 key → 登录抓取，key 写回凭据中心、JWT 只进内存', async () => {
   _resetRefetchStateForTests()
   const store = {}
   const credentials = fakeCredentials(store)
@@ -75,8 +80,10 @@ test('ensureAccountKey：无 key → 登录抓取并写回凭据中心', async (
   assert.equal(result.key, 'sk-fresh')
   assert.equal(result.refreshed, true)
   assert.equal(store.SENSENOVA_ACC1_KEY, 'sk-fresh')
-  assert.equal(store.SENSENOVA_ACC1_JWT, 'JWT9')
-  assert.equal(credentials.writes.length, 2)
+  assert.equal(store.SENSENOVA_ACC1_JWT, undefined, 'JWT 不再落凭据中心')
+  assert.equal(credentials.writes.length, 1)
+  // JWT 在进程内存缓存中可直接取用（有效期校验通过）
+  assert.equal(resolveUsableJwt('ACC1'), FUTURE_JWT)
 })
 
 test('ensureAccountKey：限频——10 分钟内第二次直接报错，超时后放行', async () => {
@@ -138,4 +145,12 @@ test('refetchAfterKeyDead：忽略现有 key，走重抓并写回', async () => 
   assert.equal(result.key, 'sk-fresh')
   assert.equal(result.refreshed, true)
   assert.equal(store.SENSENOVA_ACC1_KEY, 'sk-fresh')
+})
+
+test('resolveUsableJwt：内存 JWT 过期（含 5 分钟提前量）→ undefined，需重登', async () => {
+  _resetRefetchStateForTests()
+  const scripts = HAPPY_SCRIPTS.map((s) => (s.match === 'oauth2/token' ? { ...s, json: { access_token: PAST_JWT } } : s))
+  const hooks = { credentials: fakeCredentials({}), fetchImpl: scriptedFetch(scripts) }
+  await ensureAccountKey(okAccount(), hooks)
+  assert.equal(resolveUsableJwt('ACC1'), undefined, '过期 JWT 不可用，调用方按需重登')
 })
