@@ -43,10 +43,10 @@ test('选号评分：粘性账号冷却时自动切换', async () => {
     { label: 'ACC1', key: 'sk-1', enabled: true },
     { label: 'ACC2', key: 'sk-2', enabled: true },
   ])
-  await collect(s.stream({}, { sessionId: 'sess-B' }))
-  // ACC1 进入长冷却
-  s.accounts.get('ACC1').cooldownUntil = Date.now() + 60_000
-  await collect(s.stream({}, { sessionId: 'sess-B' }))
+  await collect(s.stream({ model: 'glm-5.2' }, { sessionId: 'sess-B' }))
+  // ACC1 的 glm-5.2 进入长冷却（限流桶按 账号×模型，只冻结该模型）
+  s.accounts.get('ACC1').cooldowns.set('glm-5.2', { until: Date.now() + 60_000, kind: 'tpm' })
+  await collect(s.stream({ model: 'glm-5.2' }, { sessionId: 'sess-B' }))
   assert.equal(s.accounts.get('ACC2').lastSessionId, 'sess-B', '粘性账号不可用时应切换')
 })
 
