@@ -149,9 +149,9 @@ window.__ModuleLoader__.load({
 		function statusBadge(account) {
 			if (account.keyStatus !== "ok") return badge(`key ${account.keyStatus}`, C.err, C.errBg);
 			if (account.cooldownRemainingMs > 0) {
-				return account.lastRateLimitKind === "busy"
-					? badge("服务繁忙", C.warn, C.warnBg)
-					: badge(`TPM 冷却 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg);
+				if (account.lastRateLimitKind === "busy") return badge("服务繁忙", C.warn, C.warnBg);
+				if (account.lastRateLimitKind === "tpm") return badge(`TPM 冷却 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg);
+				return badge(`冷却 ${Math.ceil(account.cooldownRemainingMs / 1000)}s`, C.warn, C.warnBg);
 			}
 			return account.busy ? badge("使用中", C.primary, "#e6f4ff") : badge("空闲", C.ok, C.okBg);
 		}

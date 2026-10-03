@@ -21,9 +21,10 @@ const fakeStream = (text = SSE_TEXT, delayMs = 0) =>
     yield* parseSseText([text])
   }
 
-const rateLimitError = () => {
+const rateLimitError = (bodyText = 'inference exceeds tpm/rpm limit') => {
   const error = new Error('rate')
-  error.failure = { code: 'RATE_LIMIT' }
+  // 真实 client 的 429 报错形状（报文摘要进 facts，调度器归因用）
+  error.failure = { code: 'RATE_LIMIT', facts: { status: 429, bodyText } }
   return error
 }
 
@@ -251,6 +252,34 @@ test('wait-until-available：全池冷却时等待重扫直到成功', async () 
   const chunks = await collect(s.stream({ model: 'glm-5.2' }, {}))
   assert.ok(calls >= 3, `至少重试到第三发（实际 ${calls}）`)
   assert.equal(chunks.at(-1).type, 'finish')
+})
+
+test('429 归因 other：空窗但报文非 tpm/rpm 超限措辞 → 不固定，按 accountCooldownMs 冷却换号', async () => {
+  const calledKeys = []
+  const s = makeScheduler(
+    async function* ({ key }) {
+      calledKeys.push(key)
+      throw rateLimitError('some other limit message')
+    },
+    [
+      { label: 'ACC1', key: 'sk-1', enabled: true },
+      { label: 'ACC2', key: 'sk-2', enabled: true },
+    ],
+  )
+  const t0 = Date.now()
+  // 无固定 → mode B 快速失败（RATE_LIMIT），不会像空窗超限那样一直重试
+  await assert.rejects(
+    () => collect(s.stream({ model: 'glm-5.2' }, {})),
+    (error) => error.failure?.code === 'RATE_LIMIT',
+  )
+  assert.equal(s.busyHold.get('glm-5.2'), undefined, '报文措辞不符不固定')
+  const limit = s.lastRateLimit.get('ACC1')
+  assert.equal(limit.kind, 'other')
+  const entry = s.accounts.get('ACC1').cooldowns.get('glm-5.2')
+  assert.equal(entry.kind, 'other')
+  assert.ok(entry.until - t0 >= 60_000 - 500, `未知 429 走 accountCooldownMs（实际 ${entry.until - t0}ms）`)
+  // 换号发生：ACC2 也被调用过
+  assert.ok(calledKeys.includes('sk-2'), '冷却换号而不是固定原账号')
 })
 
 test('429 归因 busy：空窗（无成功消耗）→ 短冷却 = retryIntervalMs，仅限该模型', async () => {
